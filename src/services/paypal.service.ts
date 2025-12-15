@@ -1,3 +1,4 @@
+// @ts-ignore
 import paypal from '@paypal/checkout-server-sdk';
 
 const environment = process.env.PAYPAL_MODE === 'live' 

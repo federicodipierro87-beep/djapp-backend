@@ -44,7 +44,7 @@ export const createPayPalOrder = async (req: Request, res: Response) => {
     
     res.json({
       orderId: order.id,
-      approvalUrl: order.links?.find(link => link.rel === 'approve')?.href
+      approvalUrl: order.links?.find((link: any) => link.rel === 'approve')?.href
     });
   } catch (error) {
     throw error;
