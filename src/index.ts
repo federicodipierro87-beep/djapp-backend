@@ -38,7 +38,10 @@ console.log('Allowed CORS origins:', allowedOrigins);
 
 app.use(cors({
   origin: allowedOrigins,
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200
 }));
 app.use(limiter);
 app.use(express.json({ limit: '10mb' }));
