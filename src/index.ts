@@ -25,12 +25,17 @@ const limiter = rateLimit({
 });
 
 app.use(helmet());
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://djapp-frontend.netlify.app'
+];
+
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(process.env.FRONTEND_URL);
+}
+
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'https://djapp-frontend.netlify.app',
-    process.env.FRONTEND_URL
-  ].filter(Boolean),
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(limiter);
