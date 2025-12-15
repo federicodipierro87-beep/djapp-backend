@@ -1,0 +1,84 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model DJ {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  password        String
+  name            String
+  stripeAccountId String?
+  paypalEmail     String?
+  satispayId      String?
+  eventCode       String    @unique
+  minDonation     Decimal   @default(5.00)
+  requests        Request[]
+  queue           QueueItem[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("djs")
+}
+
+model Request {
+  id              String        @id @default(uuid())
+  songTitle       String
+  artistName      String
+  requesterName   String
+  requesterEmail  String?
+  donationAmount  Decimal
+  paymentMethod   PaymentMethod
+  paymentIntentId String?
+  status          RequestStatus @default(PENDING)
+  djId            String
+  dj              DJ            @relation(fields: [djId], references: [id], onDelete: Cascade)
+  queueItem       QueueItem?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@map("requests")
+}
+
+model QueueItem {
+  id        String      @id @default(uuid())
+  requestId String      @unique
+  request   Request     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  djId      String
+  dj        DJ          @relation(fields: [djId], references: [id], onDelete: Cascade)
+  position  Int
+  status    QueueStatus @default(WAITING)
+  addedAt   DateTime    @default(now())
+  playedAt  DateTime?
+
+  @@map("queue_items")
+}
+
+enum PaymentMethod {
+  CARD
+  APPLE_PAY
+  GOOGLE_PAY
+  PAYPAL
+  SATISPAY
+}
+
+enum RequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum QueueStatus {
+  WAITING
+  NOW_PLAYING
+  PLAYED
+  SKIPPED
+}
