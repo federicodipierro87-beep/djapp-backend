@@ -34,6 +34,8 @@ if (process.env.FRONTEND_URL) {
   allowedOrigins.push(process.env.FRONTEND_URL);
 }
 
+console.log('Allowed CORS origins:', allowedOrigins);
+
 app.use(cors({
   origin: allowedOrigins,
   credentials: true
