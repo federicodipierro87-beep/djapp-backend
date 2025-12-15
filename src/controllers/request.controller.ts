@@ -14,7 +14,8 @@ const createRequestSchema = z.object({
   requesterName: z.string().min(1),
   requesterEmail: z.string().email().optional(),
   donationAmount: z.number().min(0.01),
-  paymentMethod: z.enum(['CARD', 'APPLE_PAY', 'GOOGLE_PAY', 'PAYPAL', 'SATISPAY'])
+  paymentMethod: z.enum(['CARD', 'APPLE_PAY', 'GOOGLE_PAY', 'PAYPAL', 'SATISPAY']),
+  paymentIntentId: z.string().optional()
 });
 
 export const createRequest = async (req: Request, res: Response) => {
@@ -36,25 +37,31 @@ export const createRequest = async (req: Request, res: Response) => {
       });
     }
 
-    let paymentIntentId: string | null = null;
+    // Use provided paymentIntentId if available (payment already completed)
+    let paymentIntentId: string | null = data.paymentIntentId || null;
+    let clientSecret: string | null = null;
 
-    switch (data.paymentMethod) {
-      case 'CARD':
-      case 'APPLE_PAY':
-      case 'GOOGLE_PAY':
-        const paymentIntent = await stripeService.createPaymentIntent(data.donationAmount);
-        paymentIntentId = paymentIntent.id;
-        break;
-      
-      case 'PAYPAL':
-        const order = await paypalService.createOrder(data.donationAmount);
-        paymentIntentId = order.id;
-        break;
-      
-      case 'SATISPAY':
-        const payment = await satispayService.createPayment(data.donationAmount);
-        paymentIntentId = payment.id;
-        break;
+    // Only create new payment intent if not provided
+    if (!paymentIntentId) {
+      switch (data.paymentMethod) {
+        case 'CARD':
+        case 'APPLE_PAY':
+        case 'GOOGLE_PAY':
+          const paymentIntent = await stripeService.createPaymentIntent(data.donationAmount);
+          paymentIntentId = paymentIntent.id;
+          clientSecret = paymentIntent.client_secret;
+          break;
+        
+        case 'PAYPAL':
+          const order = await paypalService.createOrder(data.donationAmount);
+          paymentIntentId = order.id;
+          break;
+        
+        case 'SATISPAY':
+          const payment = await satispayService.createPayment(data.donationAmount);
+          paymentIntentId = payment.id;
+          break;
+      }
     }
 
     const request = await prisma.request.create({
@@ -80,6 +87,7 @@ export const createRequest = async (req: Request, res: Response) => {
       donationAmount: request.donationAmount,
       status: request.status,
       paymentIntentId,
+      clientSecret,
       timeRemaining,
       expiresAt: new Date(request.createdAt.getTime() + 60 * 60 * 1000),
       createdAt: request.createdAt
