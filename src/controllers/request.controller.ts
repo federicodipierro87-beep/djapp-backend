@@ -163,6 +163,7 @@ export const getDJRequests = async (req: AuthenticatedRequest, res: Response) =>
 
 export const acceptRequest = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    console.log('Accept request called for ID:', req.params.id);
     const { id } = req.params;
 
     const request = await prisma.request.findUnique({
