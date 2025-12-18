@@ -4,7 +4,7 @@ import { stripeService } from './stripe.service';
 import { paypalService } from './paypal.service';
 import { satispayService } from './satispay.service';
 
-const EXPIRATION_MINUTES = 60;
+const EXPIRATION_MINUTES = 180;
 
 export class ExpirationService {
   start() {

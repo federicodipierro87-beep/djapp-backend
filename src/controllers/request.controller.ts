@@ -89,7 +89,7 @@ export const createRequest = async (req: Request, res: Response) => {
       paymentIntentId,
       clientSecret,
       timeRemaining,
-      expiresAt: new Date(request.createdAt.getTime() + 60 * 60 * 1000),
+      expiresAt: new Date(request.createdAt.getTime() + 180 * 60 * 1000),
       createdAt: request.createdAt
     });
   } catch (error) {
@@ -125,7 +125,7 @@ export const getRequestsByEvent = async (req: Request, res: Response) => {
           requesterName: request.requesterName,
           status: request.status,
           timeRemaining,
-          expiresAt: new Date(request.createdAt.getTime() + 60 * 60 * 1000),
+          expiresAt: new Date(request.createdAt.getTime() + 180 * 60 * 1000),
           createdAt: request.createdAt
         };
       })
@@ -157,7 +157,7 @@ export const getDJRequests = async (req: AuthenticatedRequest, res: Response) =>
           paymentMethod: request.paymentMethod,
           status: request.status,
           timeRemaining,
-          expiresAt: new Date(request.createdAt.getTime() + 60 * 60 * 1000),
+          expiresAt: new Date(request.createdAt.getTime() + 180 * 60 * 1000),
           createdAt: request.createdAt
         };
       })
