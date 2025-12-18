@@ -137,16 +137,22 @@ export const getEventStats = async (req: AuthenticatedRequest, res: Response) =>
       prisma.queueItem.count({
         where: { djId: req.dj!.djId }
       }),
-      prisma.request.aggregate({
+      // Calcola i guadagni solo dalle canzoni PLAYED, non quelle SKIPPED
+      prisma.queueItem.findMany({
         where: { 
           djId: req.dj!.djId,
-          status: 'ACCEPTED'
+          status: 'PLAYED'
         },
-        _sum: {
-          donationAmount: true
+        include: {
+          request: true
         }
       })
     ]);
+
+    // Calcola i guadagni sommando le donazioni delle canzoni PLAYED
+    const calculatedEarnings = totalEarnings.reduce((sum, queueItem) => {
+      return sum + queueItem.request.donationAmount.toNumber();
+    }, 0);
 
     res.json({
       totalRequests,
@@ -154,7 +160,7 @@ export const getEventStats = async (req: AuthenticatedRequest, res: Response) =>
       acceptedRequests,
       rejectedRequests: totalRequests - pendingRequests - acceptedRequests,
       queueLength,
-      totalEarnings: totalEarnings._sum.donationAmount || 0
+      totalEarnings: calculatedEarnings
     });
   } catch (error) {
     throw error;

@@ -85,8 +85,12 @@ export const getDJQueue = async (req: AuthenticatedRequest, res: Response) => {
       isNowPlaying: item.status === 'NOW_PLAYING'
     }));
 
+    // Calcola guadagni solo dalle canzoni PLAYED, non quelle SKIPPED
     const totalEarnings = queueItems.reduce((total, item) => {
-      return total + item.request.donationAmount.toNumber();
+      if (item.status === 'PLAYED') {
+        return total + item.request.donationAmount.toNumber();
+      }
+      return total;
     }, 0);
 
     res.json({
