@@ -70,43 +70,82 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
 };
 
 const createEventSummary = async (djId: string, eventCode: string) => {
+  // Trova l'ultimo evento per determinare quando è iniziato quello corrente
+  const lastEventSummary = await prisma.eventSummary.findFirst({
+    where: { djId },
+    orderBy: { endedAt: 'desc' }
+  });
+
+  // La data di inizio dell'evento corrente è quando è finito l'ultimo evento, 
+  // oppure quando è stata fatta la prima richiesta se non ci sono eventi precedenti
+  let eventStartTime: Date;
+  if (lastEventSummary) {
+    eventStartTime = lastEventSummary.endedAt;
+  } else {
+    // Se è il primo evento, trova la prima richiesta mai fatta
+    const firstRequest = await prisma.request.findFirst({
+      where: { djId },
+      orderBy: { createdAt: 'asc' }
+    });
+    eventStartTime = firstRequest?.createdAt || new Date();
+  }
+
   const [
     totalRequests,
     acceptedRequests,
     rejectedRequests,
     expiredRequests,
     closedRequests,
-    queueStats,
-    djInfo
+    queueStats
   ] = await Promise.all([
     prisma.request.count({
-      where: { djId }
+      where: { 
+        djId,
+        createdAt: { gte: eventStartTime }
+      }
     }),
     prisma.request.count({
-      where: { djId, status: 'ACCEPTED' }
+      where: { 
+        djId, 
+        status: 'ACCEPTED',
+        createdAt: { gte: eventStartTime }
+      }
     }),
     prisma.request.count({
-      where: { djId, status: 'REJECTED' }
+      where: { 
+        djId, 
+        status: 'REJECTED',
+        createdAt: { gte: eventStartTime }
+      }
     }),
     prisma.request.count({
-      where: { djId, status: 'EXPIRED' }
+      where: { 
+        djId, 
+        status: 'EXPIRED',
+        createdAt: { gte: eventStartTime }
+      }
     }),
     prisma.request.count({
-      where: { djId, status: 'CLOSED' }
+      where: { 
+        djId, 
+        status: 'CLOSED',
+        createdAt: { gte: eventStartTime }
+      }
     }),
     prisma.queueItem.findMany({
       where: { djId },
-      include: { request: true }
-    }),
-    prisma.dJ.findUnique({
-      where: { id: djId },
-      select: { createdAt: true }
+      include: { 
+        request: true
+      }
     })
   ]);
 
-  const playedSongs = queueStats.filter(item => item.status === 'PLAYED').length;
-  const skippedSongs = queueStats.filter(item => item.status === 'SKIPPED').length;
-  const totalEarnings = queueStats
+  // Filtra solo i queueItems che hanno richieste dell'evento corrente
+  const currentEventQueueStats = queueStats.filter(item => item.request && item.request.createdAt >= eventStartTime);
+  
+  const playedSongs = currentEventQueueStats.filter(item => item.status === 'PLAYED').length;
+  const skippedSongs = currentEventQueueStats.filter(item => item.status === 'SKIPPED').length;
+  const totalEarnings = currentEventQueueStats
     .filter(item => item.status === 'PLAYED')
     .reduce((sum, item) => sum + item.request.donationAmount.toNumber(), 0);
 
@@ -122,7 +161,7 @@ const createEventSummary = async (djId: string, eventCode: string) => {
       playedSongs,
       skippedSongs,
       totalEarnings,
-      startedAt: djInfo?.createdAt || new Date()
+      startedAt: eventStartTime
     }
   });
 };
