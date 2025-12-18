@@ -11,19 +11,20 @@ datasource db {
 }
 
 model DJ {
-  id              String    @id @default(uuid())
-  email           String    @unique
+  id              String         @id @default(uuid())
+  email           String         @unique
   password        String
   name            String
   stripeAccountId String?
   paypalEmail     String?
   satispayId      String?
-  eventCode       String    @unique
-  minDonation     Decimal   @default(5.00)
+  eventCode       String         @unique
+  minDonation     Decimal        @default(5.00)
   requests        Request[]
   queue           QueueItem[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  eventSummaries  EventSummary[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   @@map("djs")
 }
@@ -81,4 +82,23 @@ enum QueueStatus {
   NOW_PLAYING
   PLAYED
   SKIPPED
+}
+
+model EventSummary {
+  id               String   @id @default(uuid())
+  djId             String
+  dj               DJ       @relation(fields: [djId], references: [id], onDelete: Cascade)
+  eventCode        String
+  totalRequests    Int
+  acceptedRequests Int
+  rejectedRequests Int
+  expiredRequests  Int
+  playedSongs      Int
+  skippedSongs     Int
+  totalEarnings    Decimal
+  startedAt        DateTime
+  endedAt          DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  @@map("event_summaries")
 }

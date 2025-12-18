@@ -69,8 +69,112 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+const createEventSummary = async (djId: string, eventCode: string) => {
+  const [
+    totalRequests,
+    acceptedRequests,
+    rejectedRequests,
+    expiredRequests,
+    queueStats,
+    djInfo
+  ] = await Promise.all([
+    prisma.request.count({
+      where: { djId }
+    }),
+    prisma.request.count({
+      where: { djId, status: 'ACCEPTED' }
+    }),
+    prisma.request.count({
+      where: { djId, status: 'REJECTED' }
+    }),
+    prisma.request.count({
+      where: { djId, status: 'EXPIRED' }
+    }),
+    prisma.queueItem.findMany({
+      where: { djId },
+      include: { request: true }
+    }),
+    prisma.dJ.findUnique({
+      where: { id: djId },
+      select: { createdAt: true }
+    })
+  ]);
+
+  const playedSongs = queueStats.filter(item => item.status === 'PLAYED').length;
+  const skippedSongs = queueStats.filter(item => item.status === 'SKIPPED').length;
+  const totalEarnings = queueStats
+    .filter(item => item.status === 'PLAYED')
+    .reduce((sum, item) => sum + item.request.donationAmount.toNumber(), 0);
+
+  return await prisma.eventSummary.create({
+    data: {
+      djId,
+      eventCode,
+      totalRequests,
+      acceptedRequests,
+      rejectedRequests,
+      expiredRequests,
+      playedSongs,
+      skippedSongs,
+      totalEarnings,
+      startedAt: djInfo?.createdAt || new Date()
+    }
+  });
+};
+
+export const endCurrentEvent = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const dj = await prisma.dJ.findUnique({
+      where: { id: req.dj!.djId }
+    });
+
+    if (!dj) {
+      return res.status(404).json({ error: 'DJ not found' });
+    }
+
+    const eventSummary = await createEventSummary(req.dj!.djId, dj.eventCode);
+
+    await prisma.$transaction([
+      prisma.queueItem.deleteMany({
+        where: { djId: req.dj!.djId }
+      }),
+      prisma.request.updateMany({
+        where: { 
+          djId: req.dj!.djId,
+          status: 'PENDING'
+        },
+        data: { status: 'EXPIRED' }
+      }),
+      prisma.request.updateMany({
+        where: { 
+          djId: req.dj!.djId,
+          status: 'ACCEPTED'
+        },
+        data: { status: 'EXPIRED' }
+      })
+    ]);
+
+    res.json({
+      message: 'Event ended successfully',
+      summary: eventSummary
+    });
+  } catch (error) {
+    throw error;
+  }
+};
+
 export const generateNewEventCode = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const dj = await prisma.dJ.findUnique({
+      where: { id: req.dj!.djId }
+    });
+
+    if (!dj) {
+      return res.status(404).json({ error: 'DJ not found' });
+    }
+
+    const eventSummary = await createEventSummary(req.dj!.djId, dj.eventCode);
+
     let eventCode: string;
     let isUnique = false;
     
@@ -97,14 +201,35 @@ export const generateNewEventCode = async (req: AuthenticatedRequest, res: Respo
           status: 'PENDING'
         },
         data: { status: 'EXPIRED' }
+      }),
+      prisma.request.updateMany({
+        where: { 
+          djId: req.dj!.djId,
+          status: 'ACCEPTED'
+        },
+        data: { status: 'EXPIRED' }
       })
     ]);
 
     res.json({
       message: 'New event started successfully',
       eventCode: updatedDj.eventCode,
-      eventUrl: `${process.env.FRONTEND_URL}/event/${updatedDj.eventCode}`
+      eventUrl: `${process.env.FRONTEND_URL}/event/${updatedDj.eventCode}`,
+      previousEventSummary: eventSummary
     });
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const getEventSummaries = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const summaries = await prisma.eventSummary.findMany({
+      where: { djId: req.dj!.djId },
+      orderBy: { endedAt: 'desc' }
+    });
+
+    res.json(summaries);
   } catch (error) {
     throw error;
   }
