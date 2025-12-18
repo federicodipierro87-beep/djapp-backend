@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { stripeService } from '../services/stripe.service';
+import { paypalService } from '../services/paypal.service';
+import { satispayService } from '../services/satispay.service';
 
 const reorderSchema = z.object({
   queueItemIds: z.array(z.string())
@@ -156,6 +159,52 @@ export const markAsPlayed = async (req: AuthenticatedRequest, res: Response) => 
   try {
     const { id } = req.params;
 
+    // Ottieni informazioni sulla richiesta per il pagamento
+    const queueItem = await prisma.queueItem.findUnique({
+      where: { 
+        id,
+        djId: req.dj!.djId
+      },
+      include: {
+        request: true
+      }
+    });
+
+    if (!queueItem) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const request = queueItem.request;
+    let captureResult;
+
+    // Cattura il pagamento ora che la canzone viene effettivamente suonata
+    switch (request.paymentMethod) {
+      case 'CARD':
+      case 'APPLE_PAY':
+      case 'GOOGLE_PAY':
+        if (request.paymentIntentId) {
+          captureResult = await stripeService.capturePaymentIntent(request.paymentIntentId);
+        }
+        break;
+      
+      case 'PAYPAL':
+        if (request.paymentIntentId) {
+          const order = await paypalService.getOrder(request.paymentIntentId);
+          if (order.purchase_units[0].payments?.authorizations) {
+            const authId = order.purchase_units[0].payments.authorizations[0].id;
+            captureResult = await paypalService.captureAuthorization(authId);
+          }
+        }
+        break;
+      
+      case 'SATISPAY':
+        if (request.paymentIntentId) {
+          captureResult = await satispayService.acceptPayment(request.paymentIntentId);
+        }
+        break;
+    }
+
+    // Aggiorna lo stato della canzone solo se il pagamento è stato catturato con successo
     await prisma.queueItem.update({
       where: { 
         id,
@@ -167,8 +216,12 @@ export const markAsPlayed = async (req: AuthenticatedRequest, res: Response) => 
       }
     });
 
-    res.json({ message: 'Song marked as played' });
+    res.json({ 
+      message: 'Song marked as played and payment captured',
+      captureResult
+    });
   } catch (error) {
+    console.error('Error in markAsPlayed:', error);
     throw error;
   }
 };
@@ -177,6 +230,52 @@ export const skipSong = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
 
+    // Ottieni informazioni sulla richiesta per cancellare il pagamento
+    const queueItem = await prisma.queueItem.findUnique({
+      where: { 
+        id,
+        djId: req.dj!.djId
+      },
+      include: {
+        request: true
+      }
+    });
+
+    if (!queueItem) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const request = queueItem.request;
+    let cancelResult;
+
+    // Cancella il pagamento dato che la canzone viene skippata
+    switch (request.paymentMethod) {
+      case 'CARD':
+      case 'APPLE_PAY':
+      case 'GOOGLE_PAY':
+        if (request.paymentIntentId) {
+          cancelResult = await stripeService.cancelPaymentIntent(request.paymentIntentId);
+        }
+        break;
+      
+      case 'PAYPAL':
+        if (request.paymentIntentId) {
+          const order = await paypalService.getOrder(request.paymentIntentId);
+          if (order.purchase_units[0].payments?.authorizations) {
+            const authId = order.purchase_units[0].payments.authorizations[0].id;
+            cancelResult = await paypalService.voidAuthorization(authId);
+          }
+        }
+        break;
+      
+      case 'SATISPAY':
+        if (request.paymentIntentId) {
+          cancelResult = await satispayService.cancelPayment(request.paymentIntentId);
+        }
+        break;
+    }
+
+    // Aggiorna lo stato della canzone a SKIPPED
     await prisma.queueItem.update({
       where: { 
         id,
@@ -187,8 +286,12 @@ export const skipSong = async (req: AuthenticatedRequest, res: Response) => {
       }
     });
 
-    res.json({ message: 'Song skipped' });
+    res.json({ 
+      message: 'Song skipped and payment cancelled - no charge to customer',
+      cancelResult
+    });
   } catch (error) {
+    console.error('Error in skipSong:', error);
     throw error;
   }
 };

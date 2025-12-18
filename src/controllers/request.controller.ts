@@ -192,33 +192,7 @@ export const acceptRequest = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(400).json({ error: 'Request has expired' });
     }
 
-    let captureResult;
-
-    switch (request.paymentMethod) {
-      case 'CARD':
-      case 'APPLE_PAY':
-      case 'GOOGLE_PAY':
-        if (request.paymentIntentId) {
-          captureResult = await stripeService.capturePaymentIntent(request.paymentIntentId);
-        }
-        break;
-      
-      case 'PAYPAL':
-        if (request.paymentIntentId) {
-          const order = await paypalService.getOrder(request.paymentIntentId);
-          if (order.purchase_units[0].payments?.authorizations) {
-            const authId = order.purchase_units[0].payments.authorizations[0].id;
-            captureResult = await paypalService.captureAuthorization(authId);
-          }
-        }
-        break;
-      
-      case 'SATISPAY':
-        if (request.paymentIntentId) {
-          captureResult = await satispayService.acceptPayment(request.paymentIntentId);
-        }
-        break;
-    }
+    // Pagamento non viene più catturato qui, ma solo quando la canzone viene effettivamente suonata
 
     const nextPosition = await prisma.queueItem.count({
       where: { djId: req.dj!.djId }
@@ -239,8 +213,7 @@ export const acceptRequest = async (req: AuthenticatedRequest, res: Response) =>
     ]);
 
     res.json({
-      message: 'Request accepted and added to queue',
-      captureResult
+      message: 'Request accepted and added to queue - payment will be captured when song is played'
     });
   } catch (error) {
     throw error;
