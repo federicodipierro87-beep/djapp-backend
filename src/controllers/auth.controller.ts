@@ -124,7 +124,9 @@ export const me = async (req: AuthenticatedRequest, res: Response) => {
       minDonation: dj.minDonation,
       stripeAccountId: dj.stripeAccountId,
       paypalEmail: dj.paypalEmail,
-      satispayId: dj.satispayId
+      satispayId: dj.satispayId,
+      createdAt: dj.createdAt,
+      updatedAt: dj.updatedAt
     });
   } catch (error) {
     throw error;
