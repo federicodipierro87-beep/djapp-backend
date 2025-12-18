@@ -237,6 +237,15 @@ export const getEventSummaries = async (req: AuthenticatedRequest, res: Response
 
 export const getEventStats = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    // Trova l'ultimo evento terminato per filtrare solo le statistiche dell'evento corrente
+    const lastEventSummary = await prisma.eventSummary.findFirst({
+      where: { djId: req.dj!.djId },
+      orderBy: { endedAt: 'desc' }
+    });
+
+    // Se c'è un evento terminato, filtra solo le richieste successive
+    const eventStartTime = lastEventSummary ? lastEventSummary.endedAt : new Date(0);
+
     const [
       totalRequests,
       pendingRequests,
@@ -245,24 +254,29 @@ export const getEventStats = async (req: AuthenticatedRequest, res: Response) =>
       totalEarnings
     ] = await Promise.all([
       prisma.request.count({
-        where: { djId: req.dj!.djId }
-      }),
-      prisma.request.count({
         where: { 
           djId: req.dj!.djId,
-          status: 'PENDING'
+          createdAt: { gt: eventStartTime }
         }
       }),
       prisma.request.count({
         where: { 
           djId: req.dj!.djId,
-          status: 'ACCEPTED'
+          status: 'PENDING',
+          createdAt: { gt: eventStartTime }
+        }
+      }),
+      prisma.request.count({
+        where: { 
+          djId: req.dj!.djId,
+          status: 'ACCEPTED',
+          createdAt: { gt: eventStartTime }
         }
       }),
       prisma.queueItem.count({
         where: { djId: req.dj!.djId }
       }),
-      // Calcola i guadagni solo dalle canzoni PLAYED, non quelle SKIPPED
+      // Calcola i guadagni solo dalle canzoni PLAYED dell'evento corrente
       prisma.queueItem.findMany({
         where: { 
           djId: req.dj!.djId,
@@ -274,9 +288,13 @@ export const getEventStats = async (req: AuthenticatedRequest, res: Response) =>
       })
     ]);
 
-    // Calcola i guadagni sommando le donazioni delle canzoni PLAYED
+    // Calcola i guadagni sommando le donazioni delle canzoni PLAYED dell'evento corrente
     const calculatedEarnings = totalEarnings.reduce((sum, queueItem) => {
-      return sum + queueItem.request.donationAmount.toNumber();
+      // Solo le richieste create dopo l'ultimo evento terminato
+      if (queueItem.request.createdAt > eventStartTime) {
+        return sum + queueItem.request.donationAmount.toNumber();
+      }
+      return sum;
     }, 0);
 
     res.json({
