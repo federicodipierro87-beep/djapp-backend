@@ -240,6 +240,28 @@ export const getEventSummaries = async (req: AuthenticatedRequest, res: Response
   }
 };
 
+export const deleteEventSummary = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const eventSummary = await prisma.eventSummary.findUnique({
+      where: { id }
+    });
+
+    if (!eventSummary || eventSummary.djId !== req.dj!.djId) {
+      return res.status(404).json({ error: 'Event summary not found' });
+    }
+
+    await prisma.eventSummary.delete({
+      where: { id }
+    });
+
+    res.json({ message: 'Event summary deleted successfully' });
+  } catch (error) {
+    throw error;
+  }
+};
+
 export const getEventStats = async (req: AuthenticatedRequest, res: Response) => {
   try {
     // Trova l'ultimo evento terminato per filtrare solo le statistiche dell'evento corrente
