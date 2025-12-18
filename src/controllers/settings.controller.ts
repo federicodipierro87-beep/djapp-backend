@@ -75,6 +75,7 @@ const createEventSummary = async (djId: string, eventCode: string) => {
     acceptedRequests,
     rejectedRequests,
     expiredRequests,
+    closedRequests,
     queueStats,
     djInfo
   ] = await Promise.all([
@@ -89,6 +90,9 @@ const createEventSummary = async (djId: string, eventCode: string) => {
     }),
     prisma.request.count({
       where: { djId, status: 'EXPIRED' }
+    }),
+    prisma.request.count({
+      where: { djId, status: 'CLOSED' }
     }),
     prisma.queueItem.findMany({
       where: { djId },
@@ -114,6 +118,7 @@ const createEventSummary = async (djId: string, eventCode: string) => {
       acceptedRequests,
       rejectedRequests,
       expiredRequests,
+      closedRequests,
       playedSongs,
       skippedSongs,
       totalEarnings,
@@ -150,7 +155,7 @@ export const endCurrentEvent = async (req: AuthenticatedRequest, res: Response) 
           djId: req.dj!.djId,
           status: 'ACCEPTED'
         },
-        data: { status: 'EXPIRED' }
+        data: { status: 'CLOSED' }
       })
     ]);
 
@@ -207,7 +212,7 @@ export const generateNewEventCode = async (req: AuthenticatedRequest, res: Respo
           djId: req.dj!.djId,
           status: 'ACCEPTED'
         },
-        data: { status: 'EXPIRED' }
+        data: { status: 'CLOSED' }
       })
     ]);
 

@@ -75,6 +75,7 @@ enum RequestStatus {
   ACCEPTED
   REJECTED
   EXPIRED
+  CLOSED
 }
 
 enum QueueStatus {
@@ -93,6 +94,7 @@ model EventSummary {
   acceptedRequests Int
   rejectedRequests Int
   expiredRequests  Int
+  closedRequests   Int      @default(0)
   playedSongs      Int
   skippedSongs     Int
   totalEarnings    Decimal
