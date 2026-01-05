@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { EmailService } from '../services/email.service';
 
 export const getPendingDJs = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -69,6 +70,14 @@ export const approveDJ = async (req: AuthenticatedRequest, res: Response) => {
       }
     });
 
+    // Send approval email
+    try {
+      await EmailService.sendDJApprovalEmail(updatedDJ.email, updatedDJ.name);
+    } catch (emailError) {
+      console.error('Error sending approval email:', emailError);
+      // Don't fail the approval if email fails
+    }
+
     res.json({ 
       message: 'DJ approvato con successo',
       dj: updatedDJ
@@ -93,6 +102,14 @@ export const rejectDJ = async (req: AuthenticatedRequest, res: Response) => {
         status: true
       }
     });
+
+    // Send rejection email
+    try {
+      await EmailService.sendDJRejectionEmail(updatedDJ.email, updatedDJ.name);
+    } catch (emailError) {
+      console.error('Error sending rejection email:', emailError);
+      // Don't fail the rejection if email fails
+    }
 
     res.json({ 
       message: 'DJ respinto',
