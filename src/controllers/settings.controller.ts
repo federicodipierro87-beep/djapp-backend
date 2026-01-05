@@ -1,10 +1,14 @@
 import { Response } from 'express';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const updateSettingsSchema = z.object({
   name: z.string().min(2).optional(),
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+  address: z.string().min(1).optional(),
   minDonation: z.number().min(0.01).max(1000).optional(),
   stripeAccountId: z.string().optional(),
   paypalEmail: z.string().email().optional(),
@@ -29,6 +33,9 @@ export const getSettings = async (req: AuthenticatedRequest, res: Response) => {
       id: dj.id,
       email: dj.email,
       name: dj.name,
+      firstName: dj.firstName,
+      lastName: dj.lastName,
+      address: dj.address,
       eventCode: dj.eventCode,
       minDonation: dj.minDonation,
       stripeAccountId: dj.stripeAccountId,
@@ -57,6 +64,9 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
         id: updatedDj.id,
         email: updatedDj.email,
         name: updatedDj.name,
+        firstName: updatedDj.firstName,
+        lastName: updatedDj.lastName,
+        address: updatedDj.address,
         eventCode: updatedDj.eventCode,
         minDonation: updatedDj.minDonation,
         stripeAccountId: updatedDj.stripeAccountId,
@@ -371,6 +381,44 @@ export const getEventStats = async (req: AuthenticatedRequest, res: Response) =>
       queueLength,
       totalEarnings: calculatedEarnings
     });
+  } catch (error) {
+    throw error;
+  }
+};
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string(),
+  newPassword: z.string().min(6)
+});
+
+export const changePassword = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+
+    const dj = await prisma.dJ.findUnique({
+      where: { id: req.dj!.djId }
+    });
+
+    if (!dj) {
+      return res.status(404).json({ error: 'DJ not found' });
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, dj.password);
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({ error: 'Password attuale non corretta' });
+    }
+
+    // Hash new password
+    const hashedNewPassword = await bcrypt.hash(newPassword, 12);
+
+    // Update password
+    await prisma.dJ.update({
+      where: { id: req.dj!.djId },
+      data: { password: hashedNewPassword }
+    });
+
+    res.json({ message: 'Password aggiornata con successo' });
   } catch (error) {
     throw error;
   }

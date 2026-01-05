@@ -15,6 +15,9 @@ model DJ {
   email           String         @unique
   password        String
   name            String
+  firstName       String?
+  lastName        String?
+  address         String?
   stripeAccountId String?
   paypalEmail     String?
   satispayId      String?
