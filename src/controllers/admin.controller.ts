@@ -120,3 +120,64 @@ export const rejectDJ = async (req: AuthenticatedRequest, res: Response) => {
     res.status(500).json({ error: 'Errore nel respingere il DJ' });
   }
 };
+
+export const deleteDJ = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { djId } = req.params;
+
+    // First, get DJ info for the response
+    const djToDelete = await prisma.dJ.findUnique({
+      where: { id: djId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        isAdmin: true
+      }
+    });
+
+    if (!djToDelete) {
+      return res.status(404).json({ error: 'DJ non trovato' });
+    }
+
+    // Prevent deletion of admin users
+    if (djToDelete.isAdmin) {
+      return res.status(400).json({ error: 'Non puoi cancellare un account admin' });
+    }
+
+    // Delete all related data in correct order (due to foreign key constraints)
+    await prisma.$transaction(async (tx) => {
+      // Delete queue items first
+      await tx.queueItem.deleteMany({
+        where: { djId }
+      });
+
+      // Delete event summaries
+      await tx.eventSummary.deleteMany({
+        where: { djId }
+      });
+
+      // Delete requests
+      await tx.request.deleteMany({
+        where: { djId }
+      });
+
+      // Finally delete the DJ
+      await tx.dJ.delete({
+        where: { id: djId }
+      });
+    });
+
+    res.json({ 
+      message: 'DJ cancellato con successo',
+      deletedDJ: {
+        id: djToDelete.id,
+        email: djToDelete.email,
+        name: djToDelete.name
+      }
+    });
+  } catch (error) {
+    console.error('Error deleting DJ:', error);
+    res.status(500).json({ error: 'Errore nella cancellazione del DJ' });
+  }
+};
