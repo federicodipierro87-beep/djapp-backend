@@ -42,24 +42,18 @@ export const register = async (req: Request, res: Response) => {
         email,
         password: hashedPassword,
         name,
-        eventCode: eventCode!
+        eventCode: eventCode!,
+        status: 'PENDING'
       }
     });
 
-    const token = generateToken({
-      djId: dj.id,
-      email: dj.email
-    });
-
     res.status(201).json({
-      message: 'DJ registered successfully',
-      token,
+      message: 'Registrazione completata! In attesa di approvazione da parte dell\'amministratore.',
       dj: {
         id: dj.id,
         email: dj.email,
         name: dj.name,
-        eventCode: dj.eventCode,
-        minDonation: dj.minDonation
+        status: dj.status
       }
     });
   } catch (error) {
@@ -83,6 +77,35 @@ export const login = async (req: Request, res: Response) => {
 
     if (!isPasswordValid) {
       return res.status(400).json({ error: 'Invalid credentials' });
+    }
+
+    // Check if this is an admin login
+    if (dj.isAdmin) {
+      const token = generateToken({
+        djId: dj.id,
+        email: dj.email,
+        isAdmin: true
+      });
+
+      return res.json({
+        message: 'Admin login successful',
+        token,
+        isAdmin: true,
+        dj: {
+          id: dj.id,
+          email: dj.email,
+          name: dj.name
+        }
+      });
+    }
+
+    // Check DJ status for regular users
+    if (dj.status === 'PENDING') {
+      return res.status(403).json({ error: 'Il tuo account è in attesa di approvazione dall\'amministratore.' });
+    }
+
+    if (dj.status === 'REJECTED') {
+      return res.status(403).json({ error: 'Il tuo account è stato respinto dall\'amministratore.' });
     }
 
     const token = generateToken({

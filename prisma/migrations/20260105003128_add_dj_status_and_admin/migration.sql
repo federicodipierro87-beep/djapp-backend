@@ -1,0 +1,6 @@
+-- CreateEnum
+CREATE TYPE "DJStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
+
+-- AlterTable
+ALTER TABLE "djs" ADD COLUMN     "isAdmin" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "status" "DJStatus" NOT NULL DEFAULT 'PENDING';

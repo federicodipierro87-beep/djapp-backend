@@ -9,6 +9,7 @@ import requestRoutes from './routes/request.routes';
 import queueRoutes from './routes/queue.routes';
 import settingsRoutes from './routes/settings.routes';
 import paymentRoutes from './routes/payment.routes';
+import adminRoutes from './routes/admin.routes';
 
 import { errorMiddleware } from './middlewares/error.middleware';
 import { expirationService } from './services/expiration.service';
@@ -55,6 +56,7 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/dj', settingsRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.use(errorMiddleware);
 

@@ -20,6 +20,8 @@ model DJ {
   satispayId      String?
   eventCode       String         @unique
   minDonation     Decimal        @default(5.00)
+  status          DJStatus       @default(PENDING)
+  isAdmin         Boolean        @default(false)
   requests        Request[]
   queue           QueueItem[]
   eventSummaries  EventSummary[]
@@ -83,6 +85,12 @@ enum QueueStatus {
   NOW_PLAYING
   PLAYED
   SKIPPED
+}
+
+enum DJStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 model EventSummary {

@@ -5,6 +5,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 export interface JWTPayload {
   djId: string;
   email: string;
+  isAdmin?: boolean;
 }
 
 export const generateToken = (payload: JWTPayload): string => {
