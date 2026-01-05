@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
+import QRCode from 'qrcode';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 
@@ -419,6 +420,37 @@ export const changePassword = async (req: AuthenticatedRequest, res: Response) =
     });
 
     res.json({ message: 'Password aggiornata con successo' });
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const generateQRCode = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const dj = await prisma.dJ.findUnique({
+      where: { id: req.dj!.djId }
+    });
+
+    if (!dj) {
+      return res.status(404).json({ error: 'DJ not found' });
+    }
+
+    const eventUrl = `${process.env.FRONTEND_URL}/event/${dj.eventCode}`;
+    
+    const qrCodeDataUrl = await QRCode.toDataURL(eventUrl, {
+      width: 400,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
+
+    res.json({
+      qrCode: qrCodeDataUrl,
+      eventCode: dj.eventCode,
+      eventUrl
+    });
   } catch (error) {
     throw error;
   }
