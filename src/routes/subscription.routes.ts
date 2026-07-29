@@ -4,15 +4,13 @@ import {
   getSubscriptionStatus,
   createPortalSession,
   cancelSubscription,
-  reactivateSubscription,
-  handleWebhook
+  reactivateSubscription
 } from '../controllers/subscription.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
 
 const router = express.Router();
 
-// Webhook endpoint - must be before body parser, uses raw body
-router.post('/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+// Note: webhook is handled in index.ts before JSON parser
 
 // Authenticated endpoints
 router.post('/checkout', authMiddleware, createCheckoutSession);

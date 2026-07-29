@@ -12,6 +12,7 @@ import settingsRoutes from './routes/settings.routes';
 import paymentRoutes from './routes/payment.routes';
 import adminRoutes from './routes/admin.routes';
 import subscriptionRoutes from './routes/subscription.routes';
+import { handleWebhook } from './controllers/subscription.controller';
 
 import { errorMiddleware } from './middlewares/error.middleware';
 import { expirationService } from './services/expiration.service';
@@ -48,6 +49,10 @@ app.use(cors({
   optionsSuccessStatus: 200
 }));
 app.use(limiter);
+
+// Webhook route MUST be before express.json() to receive raw body
+app.post('/api/subscriptions/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
