@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { EmailService } from '../services/email.service';
+import { subscriptionService } from '../services/subscription.service';
 
 export const getPendingDJs = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -66,9 +67,20 @@ export const approveDJ = async (req: AuthenticatedRequest, res: Response) => {
         id: true,
         email: true,
         name: true,
-        status: true
+        status: true,
+        stripeCustomerId: true
       }
     });
+
+    // Create Stripe customer for the DJ if not already created
+    if (!updatedDJ.stripeCustomerId) {
+      try {
+        await subscriptionService.createCustomer(updatedDJ.id, updatedDJ.email, updatedDJ.name);
+      } catch (stripeError) {
+        console.error('Error creating Stripe customer:', stripeError);
+        // Don't fail the approval if Stripe customer creation fails
+      }
+    }
 
     // Send approval email
     try {
@@ -78,7 +90,7 @@ export const approveDJ = async (req: AuthenticatedRequest, res: Response) => {
       // Don't fail the approval if email fails
     }
 
-    res.json({ 
+    res.json({
       message: 'DJ approvato con successo',
       dj: updatedDJ
     });

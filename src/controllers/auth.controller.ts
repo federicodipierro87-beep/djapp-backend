@@ -4,6 +4,7 @@ import { z } from 'zod';
 import prisma from '../utils/database';
 import { generateToken } from '../utils/jwt';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { subscriptionService } from '../services/subscription.service';
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -113,6 +114,9 @@ export const login = async (req: Request, res: Response) => {
       email: dj.email
     });
 
+    // Get subscription status for the DJ
+    const subscriptionStatus = await subscriptionService.getSubscriptionStatus(dj.id);
+
     res.json({
       message: 'Login successful',
       token,
@@ -122,7 +126,8 @@ export const login = async (req: Request, res: Response) => {
         name: dj.name,
         eventCode: dj.eventCode,
         minDonation: dj.minDonation
-      }
+      },
+      subscription: subscriptionStatus
     });
   } catch (error) {
     throw error;

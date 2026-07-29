@@ -11,25 +11,27 @@ datasource db {
 }
 
 model DJ {
-  id              String         @id @default(uuid())
-  email           String         @unique
-  password        String
-  name            String
-  firstName       String?
-  lastName        String?
-  address         String?
-  stripeAccountId String?
-  paypalEmail     String?
-  satispayId      String?
-  eventCode       String         @unique
-  minDonation     Decimal        @default(5.00)
-  status          DJStatus       @default(PENDING)
-  isAdmin         Boolean        @default(false)
-  requests        Request[]
-  queue           QueueItem[]
-  eventSummaries  EventSummary[]
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id               String         @id @default(uuid())
+  email            String         @unique
+  password         String
+  name             String
+  firstName        String?
+  lastName         String?
+  address          String?
+  stripeAccountId  String?
+  stripeCustomerId String?        @unique
+  paypalEmail      String?
+  satispayId       String?
+  eventCode        String         @unique
+  minDonation      Decimal        @default(5.00)
+  status           DJStatus       @default(PENDING)
+  isAdmin          Boolean        @default(false)
+  requests         Request[]
+  queue            QueueItem[]
+  eventSummaries   EventSummary[]
+  subscription     Subscription?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
   @@map("djs")
 }
@@ -114,4 +116,35 @@ model EventSummary {
   createdAt        DateTime @default(now())
 
   @@map("event_summaries")
+}
+
+model Subscription {
+  id                   String             @id @default(uuid())
+  djId                 String             @unique
+  dj                   DJ                 @relation(fields: [djId], references: [id], onDelete: Cascade)
+  stripeSubscriptionId String             @unique
+  stripePriceId        String
+  status               SubscriptionStatus @default(TRIALING)
+  plan                 SubscriptionPlan
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  trialEnd             DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+enum SubscriptionPlan {
+  MONTHLY
+  ANNUAL
 }
