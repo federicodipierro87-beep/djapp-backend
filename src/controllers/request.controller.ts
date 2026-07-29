@@ -6,6 +6,7 @@ import { stripeService } from '../services/stripe.service';
 import { paypalService } from '../services/paypal.service';
 import { satispayService } from '../services/satispay.service';
 import { expirationService } from '../services/expiration.service';
+import { emitNewRequest, emitRequestAccepted, emitRequestRejected, emitQueueUpdated } from '../socket/socket';
 
 const createRequestSchema = z.object({
   eventCode: z.string(),
@@ -78,6 +79,17 @@ export const createRequest = async (req: Request, res: Response) => {
     });
 
     const timeRemaining = await expirationService.getTimeRemaining(request.createdAt);
+
+    // Emit socket event for new request
+    emitNewRequest(data.eventCode, {
+      id: request.id,
+      songTitle: request.songTitle,
+      artistName: request.artistName,
+      requesterName: request.requesterName,
+      donationAmount: request.donationAmount,
+      status: request.status,
+      createdAt: request.createdAt
+    });
 
     res.status(201).json({
       id: request.id,
@@ -212,6 +224,15 @@ export const acceptRequest = async (req: AuthenticatedRequest, res: Response) =>
       })
     ]);
 
+    // Emit socket events
+    emitRequestAccepted(request.dj.eventCode, {
+      id: request.id,
+      songTitle: request.songTitle,
+      artistName: request.artistName,
+      requesterName: request.requesterName
+    });
+    emitQueueUpdated(request.dj.eventCode);
+
     res.json({
       message: 'Request accepted and added to queue - payment will be captured when song is played'
     });
@@ -225,7 +246,8 @@ export const rejectRequest = async (req: AuthenticatedRequest, res: Response) =>
     const { id } = req.params;
 
     const request = await prisma.request.findUnique({
-      where: { id }
+      where: { id },
+      include: { dj: true }
     });
 
     if (!request || request.djId !== req.dj!.djId) {
@@ -266,6 +288,9 @@ export const rejectRequest = async (req: AuthenticatedRequest, res: Response) =>
       where: { id },
       data: { status: 'REJECTED' }
     });
+
+    // Emit socket event for rejected request
+    emitRequestRejected(request.dj.eventCode, request.id);
 
     res.json({ message: 'Request rejected' });
   } catch (error) {

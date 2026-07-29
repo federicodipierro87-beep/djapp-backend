@@ -5,6 +5,7 @@ import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { stripeService } from '../services/stripe.service';
 import { paypalService } from '../services/paypal.service';
 import { satispayService } from '../services/satispay.service';
+import { emitQueueUpdated, emitNowPlayingChanged } from '../socket/socket';
 
 const reorderSchema = z.object({
   queueItemIds: z.array(z.string())
@@ -109,9 +110,9 @@ export const reorderQueue = async (req: AuthenticatedRequest, res: Response) => 
   try {
     const { queueItemIds } = reorderSchema.parse(req.body);
 
-    const updatePromises = queueItemIds.map((id, index) => 
+    const updatePromises = queueItemIds.map((id, index) =>
       prisma.queueItem.update({
-        where: { 
+        where: {
           id,
           djId: req.dj!.djId
         },
@@ -120,6 +121,15 @@ export const reorderQueue = async (req: AuthenticatedRequest, res: Response) => 
     );
 
     await Promise.all(updatePromises);
+
+    // Get DJ's eventCode for socket emission
+    const dj = await prisma.dJ.findUnique({
+      where: { id: req.dj!.djId },
+      select: { eventCode: true }
+    });
+    if (dj) {
+      emitQueueUpdated(dj.eventCode);
+    }
 
     res.json({ message: 'Queue reordered successfully' });
   } catch (error) {
@@ -133,21 +143,38 @@ export const setNowPlaying = async (req: AuthenticatedRequest, res: Response) =>
 
     await prisma.$transaction([
       prisma.queueItem.updateMany({
-        where: { 
+        where: {
           djId: req.dj!.djId,
           status: 'NOW_PLAYING'
         },
         data: { status: 'WAITING' }
       }),
-      
+
       prisma.queueItem.update({
-        where: { 
+        where: {
           id,
           djId: req.dj!.djId
         },
         data: { status: 'NOW_PLAYING' }
       })
     ]);
+
+    // Get queue item with DJ info for socket emission
+    const queueItem = await prisma.queueItem.findUnique({
+      where: { id },
+      include: {
+        request: { select: { songTitle: true, artistName: true } },
+        dj: { select: { eventCode: true } }
+      }
+    });
+
+    if (queueItem) {
+      emitNowPlayingChanged(queueItem.dj.eventCode, {
+        songTitle: queueItem.request.songTitle,
+        artistName: queueItem.request.artistName
+      });
+      emitQueueUpdated(queueItem.dj.eventCode);
+    }
 
     res.json({ message: 'Song set as now playing' });
   } catch (error) {
@@ -206,17 +233,26 @@ export const markAsPlayed = async (req: AuthenticatedRequest, res: Response) => 
 
     // Aggiorna lo stato della canzone solo se il pagamento è stato catturato con successo
     await prisma.queueItem.update({
-      where: { 
+      where: {
         id,
         djId: req.dj!.djId
       },
-      data: { 
+      data: {
         status: 'PLAYED',
         playedAt: new Date()
       }
     });
 
-    res.json({ 
+    // Get DJ's eventCode for socket emission
+    const dj = await prisma.dJ.findUnique({
+      where: { id: req.dj!.djId },
+      select: { eventCode: true }
+    });
+    if (dj) {
+      emitQueueUpdated(dj.eventCode);
+    }
+
+    res.json({
       message: 'Song marked as played and payment captured',
       captureResult
     });
@@ -277,16 +313,25 @@ export const skipSong = async (req: AuthenticatedRequest, res: Response) => {
 
     // Aggiorna lo stato della canzone a SKIPPED
     await prisma.queueItem.update({
-      where: { 
+      where: {
         id,
         djId: req.dj!.djId
       },
-      data: { 
+      data: {
         status: 'SKIPPED'
       }
     });
 
-    res.json({ 
+    // Get DJ's eventCode for socket emission
+    const dj = await prisma.dJ.findUnique({
+      where: { id: req.dj!.djId },
+      select: { eventCode: true }
+    });
+    if (dj) {
+      emitQueueUpdated(dj.eventCode);
+    }
+
+    res.json({
       message: 'Song skipped and payment cancelled - no charge to customer',
       cancelResult
     });

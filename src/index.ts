@@ -1,4 +1,5 @@
 import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
@@ -13,10 +14,12 @@ import adminRoutes from './routes/admin.routes';
 
 import { errorMiddleware } from './middlewares/error.middleware';
 import { expirationService } from './services/expiration.service';
+import { initializeSocket } from './socket/socket';
 
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
 const PORT = process.env.PORT || 3001;
 
 const limiter = rateLimit({
@@ -60,10 +63,14 @@ app.use('/api/admin', adminRoutes);
 
 app.use(errorMiddleware);
 
-app.listen(PORT, () => {
+// Initialize Socket.io
+initializeSocket(httpServer, allowedOrigins);
+
+httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
-  
+  console.log(`Socket.io enabled`);
+
   expirationService.start();
 });
 
