@@ -28,6 +28,7 @@ model DJ {
   isAdmin          Boolean        @default(false)
   requests         Request[]
   queue            QueueItem[]
+  events           Event[]
   eventSummaries   EventSummary[]
   subscription     Subscription?
   createdAt        DateTime       @default(now())
@@ -48,6 +49,8 @@ model Request {
   status          RequestStatus @default(PENDING)
   djId            String
   dj              DJ            @relation(fields: [djId], references: [id], onDelete: Cascade)
+  eventId         String?
+  event           Event?        @relation(fields: [eventId], references: [id])
   queueItem       QueueItem?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -61,6 +64,8 @@ model QueueItem {
   request   Request     @relation(fields: [requestId], references: [id], onDelete: Cascade)
   djId      String
   dj        DJ          @relation(fields: [djId], references: [id], onDelete: Cascade)
+  eventId   String?
+  event     Event?      @relation(fields: [eventId], references: [id])
   position  Int
   status    QueueStatus @default(WAITING)
   addedAt   DateTime    @default(now())
@@ -147,4 +152,35 @@ enum SubscriptionStatus {
 enum SubscriptionPlan {
   MONTHLY
   ANNUAL
+}
+
+model Event {
+  id          String      @id @default(uuid())
+  djId        String
+  dj          DJ          @relation(fields: [djId], references: [id], onDelete: Cascade)
+  name        String
+  eventCode   String      @unique
+  description String?
+  address     String
+  city        String
+  latitude    Float
+  longitude   Float
+  dateTime    DateTime
+  endDateTime DateTime?
+  status      EventStatus @default(SCHEDULED)
+  requests    Request[]
+  queueItems  QueueItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([latitude, longitude])
+  @@index([status, dateTime])
+  @@map("events")
+}
+
+enum EventStatus {
+  SCHEDULED
+  ACTIVE
+  ENDED
+  CANCELLED
 }

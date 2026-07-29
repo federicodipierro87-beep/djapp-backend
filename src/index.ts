@@ -12,6 +12,7 @@ import settingsRoutes from './routes/settings.routes';
 import paymentRoutes from './routes/payment.routes';
 import adminRoutes from './routes/admin.routes';
 import subscriptionRoutes from './routes/subscription.routes';
+import eventRoutes from './routes/event.routes';
 import { handleWebhook } from './controllers/subscription.controller';
 
 import { errorMiddleware } from './middlewares/error.middleware';
@@ -67,6 +68,7 @@ app.use('/api/dj', settingsRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/events', eventRoutes);
 
 app.use(errorMiddleware);
 

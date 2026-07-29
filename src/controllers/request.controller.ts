@@ -10,6 +10,7 @@ import { emitNewRequest, emitRequestAccepted, emitRequestRejected, emitQueueUpda
 
 const createRequestSchema = z.object({
   eventCode: z.string(),
+  eventId: z.string().optional(),
   songTitle: z.string().min(1),
   artistName: z.string().min(1),
   requesterName: z.string().min(1),
@@ -74,7 +75,8 @@ export const createRequest = async (req: Request, res: Response) => {
         donationAmount: data.donationAmount,
         paymentMethod: data.paymentMethod,
         paymentIntentId,
-        djId: dj.id
+        djId: dj.id,
+        eventId: data.eventId
       }
     });
 
@@ -219,6 +221,7 @@ export const acceptRequest = async (req: AuthenticatedRequest, res: Response) =>
         data: {
           requestId: id,
           djId: req.dj!.djId,
+          eventId: request.eventId,
           position: nextPosition
         }
       })
