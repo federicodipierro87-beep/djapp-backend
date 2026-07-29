@@ -6,7 +6,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 export class SubscriptionService {
-  private readonly TRIAL_DAYS = 14;
+  private readonly TRIAL_DAYS = 7;
 
   async createCustomer(djId: string, email: string, name: string): Promise<string> {
     try {
