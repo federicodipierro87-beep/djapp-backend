@@ -24,18 +24,42 @@ export const createRequest = async (req: Request, res: Response) => {
   try {
     const data = createRequestSchema.parse(req.body);
 
-    const dj = await prisma.dJ.findUnique({
-      where: { eventCode: data.eventCode }
+    let djId: string;
+    let eventId: string | null = data.eventId || null;
+    let minDonation: number;
+    let socketEventCode: string = data.eventCode;
+
+    // First try to find in events table (new system)
+    const event = await prisma.event.findUnique({
+      where: { eventCode: data.eventCode },
+      include: { dj: true }
     });
 
-    if (!dj) {
-      return res.status(404).json({ error: 'Event not found' });
+    if (event) {
+      // Found in events table
+      if (event.status !== 'ACTIVE') {
+        return res.status(400).json({ error: 'Event is not active' });
+      }
+      djId = event.djId;
+      eventId = event.id;
+      minDonation = event.dj.minDonation.toNumber();
+    } else {
+      // Fallback: try to find in djs table (legacy system)
+      const dj = await prisma.dJ.findUnique({
+        where: { eventCode: data.eventCode }
+      });
+
+      if (!dj) {
+        return res.status(404).json({ error: 'Event not found' });
+      }
+      djId = dj.id;
+      minDonation = dj.minDonation.toNumber();
     }
 
-    if (data.donationAmount < dj.minDonation.toNumber()) {
+    if (data.donationAmount < minDonation) {
       return res.status(400).json({
-        error: `Minimum donation is €${dj.minDonation}`,
-        minDonation: dj.minDonation.toNumber()
+        error: `Minimum donation is €${minDonation}`,
+        minDonation
       });
     }
 
@@ -75,15 +99,15 @@ export const createRequest = async (req: Request, res: Response) => {
         donationAmount: data.donationAmount,
         paymentMethod: data.paymentMethod,
         paymentIntentId,
-        djId: dj.id,
-        eventId: data.eventId
+        djId,
+        eventId
       }
     });
 
     const timeRemaining = await expirationService.getTimeRemaining(request.createdAt);
 
     // Emit socket event for new request
-    emitNewRequest(data.eventCode, {
+    emitNewRequest(socketEventCode, {
       id: request.id,
       songTitle: request.songTitle,
       artistName: request.artistName,
@@ -115,16 +139,31 @@ export const getRequestsByEvent = async (req: Request, res: Response) => {
   try {
     const { eventCode } = req.params;
 
-    const dj = await prisma.dJ.findUnique({
-      where: { eventCode }
+    // First try to find in events table (new system)
+    const event = await prisma.event.findUnique({
+      where: { eventCode },
+      include: { dj: true }
     });
 
-    if (!dj) {
-      return res.status(404).json({ error: 'Event not found' });
+    let whereClause: any;
+
+    if (event) {
+      // Found in events table - filter by eventId
+      whereClause = { eventId: event.id };
+    } else {
+      // Fallback: try to find in djs table (legacy system)
+      const dj = await prisma.dJ.findUnique({
+        where: { eventCode }
+      });
+
+      if (!dj) {
+        return res.status(404).json({ error: 'Event not found' });
+      }
+      whereClause = { djId: dj.id };
     }
 
     const requests = await prisma.request.findMany({
-      where: { djId: dj.id },
+      where: whereClause,
       orderBy: { createdAt: 'desc' },
       take: 20
     });

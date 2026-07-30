@@ -15,16 +15,36 @@ export const getPublicQueue = async (req: Request, res: Response) => {
   try {
     const { eventCode } = req.params;
 
-    const dj = await prisma.dJ.findUnique({
-      where: { eventCode }
+    // First try to find in events table (new system)
+    const event = await prisma.event.findUnique({
+      where: { eventCode },
+      include: { dj: true }
     });
 
-    if (!dj) {
-      return res.status(404).json({ error: 'Event not found' });
+    let djId: string;
+
+    if (event) {
+      // Found in events table - use this event's DJ
+      djId = event.djId;
+    } else {
+      // Fallback: try to find in djs table (legacy system)
+      const dj = await prisma.dJ.findUnique({
+        where: { eventCode }
+      });
+
+      if (!dj) {
+        return res.status(404).json({ error: 'Event not found' });
+      }
+      djId = dj.id;
     }
 
+    // Get queue items - filter by eventId if it's a new event, otherwise by djId only
+    const whereClause = event
+      ? { eventId: event.id }
+      : { djId };
+
     const queueItems = await prisma.queueItem.findMany({
-      where: { djId: dj.id },
+      where: whereClause,
       include: {
         request: {
           select: {
