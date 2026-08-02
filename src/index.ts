@@ -26,10 +26,23 @@ const app = express();
 const httpServer = createServer(app);
 const PORT = process.env.PORT || 3001;
 
+// Railway terminates TLS on a single proxy hop; without this every client
+// shares the proxy IP and the rate limiters throttle all traffic at once.
+app.set('trust proxy', 1);
+
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  message: 'Too many requests from this IP, please try again later.'
+  message: 'Too many requests from this IP, please try again later.',
+  // Song search is throttled separately so it cannot exhaust the budget
+  // shared by requests and payments (clients at a venue share one IP).
+  skip: (req) => req.path.startsWith('/api/spotify')
+});
+
+const spotifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: 'Too many searches from this IP, please try again later.'
 });
 
 app.use(helmet());
@@ -70,7 +83,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/events', eventRoutes);
-app.use('/api/spotify', spotifyRoutes);
+app.use('/api/spotify', spotifyLimiter, spotifyRoutes);
 
 app.use(errorMiddleware);
 

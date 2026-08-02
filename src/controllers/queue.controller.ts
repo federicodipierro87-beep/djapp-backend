@@ -50,6 +50,7 @@ export const getPublicQueue = async (req: Request, res: Response) => {
           select: {
             songTitle: true,
             artistName: true,
+            albumCover: true,
             requesterName: true
           }
         }
@@ -62,6 +63,7 @@ export const getPublicQueue = async (req: Request, res: Response) => {
       position: item.position,
       songTitle: item.request.songTitle,
       artistName: item.request.artistName,
+      albumCover: item.request.albumCover,
       requesterName: item.request.requesterName,
       status: item.status,
       addedAt: item.addedAt,
@@ -84,6 +86,8 @@ export const getDJQueue = async (req: AuthenticatedRequest, res: Response) => {
           select: {
             songTitle: true,
             artistName: true,
+            spotifyTrackId: true,
+            albumCover: true,
             requesterName: true,
             requesterEmail: true,
             donationAmount: true,
@@ -99,6 +103,8 @@ export const getDJQueue = async (req: AuthenticatedRequest, res: Response) => {
       position: item.position,
       songTitle: item.request.songTitle,
       artistName: item.request.artistName,
+      spotifyTrackId: item.request.spotifyTrackId,
+      albumCover: item.request.albumCover,
       requesterName: item.request.requesterName,
       requesterEmail: item.request.requesterEmail,
       donationAmount: item.request.donationAmount,

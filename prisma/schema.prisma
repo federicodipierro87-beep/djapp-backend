@@ -41,6 +41,8 @@ model Request {
   id              String        @id @default(uuid())
   songTitle       String
   artistName      String
+  spotifyTrackId  String?
+  albumCover      String?
   requesterName   String
   requesterEmail  String?
   donationAmount  Decimal
