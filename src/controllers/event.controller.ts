@@ -5,17 +5,17 @@ import { eventService } from '../services/event.service';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const createEventSchema = z.object({
-  name: z.string().min(1, 'Event name is required'),
-  description: z.string().optional(),
-  address: z.string().min(1, 'Address is required'),
+  name: z.string().trim().min(1, 'Event name is required').max(120),
+  description: z.string().trim().max(1000).optional(),
+  address: z.string().trim().min(1, 'Address is required').max(250),
   dateTime: z.string().transform(str => new Date(str)),
   endDateTime: z.string().optional().transform(str => str ? new Date(str) : undefined)
 });
 
 const updateEventSchema = z.object({
-  name: z.string().min(1).optional(),
-  description: z.string().optional(),
-  address: z.string().min(1).optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(1000).optional(),
+  address: z.string().trim().min(1).max(250).optional(),
   dateTime: z.string().optional().transform(str => str ? new Date(str) : undefined),
   endDateTime: z.string().optional().transform(str => str ? new Date(str) : undefined)
 });

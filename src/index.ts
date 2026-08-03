@@ -30,10 +30,16 @@ const PORT = process.env.PORT || 3001;
 // shares the proxy IP and the rate limiters throttle all traffic at once.
 app.set('trust proxy', 1);
 
+// Every guest at a venue shares one public IP through the wifi NAT, and an open
+// DJ panel polls several queries on a timer, so this budget is per-crowd rather
+// than per-person. Brute force and search abuse have dedicated limiters below,
+// which is what keeps this one free to be generous.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: 'Too many requests from this IP, please try again later.',
+  limit: 600,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this IP, please try again later.' },
   // Song search is throttled separately so it cannot exhaust the budget
   // shared by requests and payments (clients at a venue share one IP).
   skip: (req) => req.path.startsWith('/api/spotify')
@@ -41,8 +47,10 @@ const limiter = rateLimit({
 
 const spotifyLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
-  message: 'Too many searches from this IP, please try again later.'
+  limit: 600,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many searches from this IP, please try again later.' }
 });
 
 app.use(helmet());
@@ -68,7 +76,9 @@ app.use(limiter);
 // Webhook route MUST be before express.json() to receive raw body
 app.post('/api/subscriptions/webhook', express.raw({ type: 'application/json' }), handleWebhook);
 
-app.use(express.json({ limit: '10mb' }));
+// No endpoint accepts anything close to this; the previous 10mb ceiling just
+// let a single request tie up memory and parsing time for free.
+app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true }));
 
 app.get('/health', (req, res) => {

@@ -7,14 +7,14 @@ import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const updateSettingsSchema = z.object({
-  name: z.string().min(2).optional(),
-  firstName: z.string().min(1).optional(),
-  lastName: z.string().min(1).optional(),
-  address: z.string().min(1).optional(),
+  name: z.string().trim().min(2).max(100).optional(),
+  firstName: z.string().trim().min(1).max(60).optional(),
+  lastName: z.string().trim().min(1).max(60).optional(),
+  address: z.string().trim().min(1).max(250).optional(),
   minDonation: z.number().min(0.01).max(1000).optional(),
-  stripeAccountId: z.string().optional(),
-  paypalEmail: z.string().email().optional(),
-  satispayId: z.string().optional()
+  stripeAccountId: z.string().trim().max(255).optional(),
+  paypalEmail: z.string().trim().email().max(254).optional(),
+  satispayId: z.string().trim().max(255).optional()
 });
 
 const generateEventCode = (): string => {
@@ -389,8 +389,9 @@ export const getEventStats = asyncHandler(async (req: AuthenticatedRequest, res:
 });
 
 const changePasswordSchema = z.object({
-  currentPassword: z.string(),
-  newPassword: z.string().min(6)
+  // Matches the register schema: bcrypt ignores anything past 72 bytes.
+  currentPassword: z.string().max(72),
+  newPassword: z.string().min(6).max(72)
 });
 
 export const changePassword = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

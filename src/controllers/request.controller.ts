@@ -10,17 +10,19 @@ import { emitNewRequest, emitRequestAccepted, emitRequestRejected, emitQueueUpda
 import { asyncHandler } from '../utils/asyncHandler';
 
 const createRequestSchema = z.object({
-  eventCode: z.string(),
-  eventId: z.string().optional(),
-  songTitle: z.string().min(1),
-  artistName: z.string().min(1),
+  eventCode: z.string().trim().min(1).max(20),
+  eventId: z.string().uuid().optional(),
+  songTitle: z.string().trim().min(1).max(200),
+  artistName: z.string().trim().min(1).max(200),
   spotifyTrackId: z.string().regex(/^[A-Za-z0-9]{22}$/).optional(),
-  albumCover: z.string().url().startsWith('https://i.scdn.co/').optional(),
-  requesterName: z.string().min(1),
-  requesterEmail: z.string().email().optional(),
-  donationAmount: z.number().min(0.01),
+  albumCover: z.string().url().startsWith('https://i.scdn.co/').max(300).optional(),
+  requesterName: z.string().trim().min(1).max(60),
+  requesterEmail: z.string().trim().email().max(254).optional(),
+  // The cap is enforced here too: the browser check can be bypassed and this
+  // amount is what gets authorised on the payment provider.
+  donationAmount: z.number().min(0.01).max(1000),
   paymentMethod: z.enum(['CARD', 'APPLE_PAY', 'GOOGLE_PAY', 'PAYPAL', 'SATISPAY']),
-  paymentIntentId: z.string().optional()
+  paymentIntentId: z.string().max(255).optional()
 });
 
 export const createRequest = asyncHandler(async (req: Request, res: Response) => {
@@ -30,7 +32,6 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
     let djId: string;
     let eventId: string | null = data.eventId || null;
     let minDonation: number;
-    let socketEventCode: string = data.eventCode;
 
     // First try to find in events table (new system)
     const event = await prisma.event.findUnique({
@@ -112,7 +113,7 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
     const timeRemaining = await expirationService.getTimeRemaining(request.createdAt);
 
     // Emit socket event for new request
-    emitNewRequest(socketEventCode, {
+    emitNewRequest(djId, {
       id: request.id,
       songTitle: request.songTitle,
       artistName: request.artistName,

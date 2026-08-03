@@ -9,7 +9,7 @@ import { emitQueueUpdated, emitNowPlayingChanged } from '../socket/socket';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const reorderSchema = z.object({
-  queueItemIds: z.array(z.string())
+  queueItemIds: z.array(z.string().uuid()).max(500)
 });
 
 export const getPublicQueue = asyncHandler(async (req: Request, res: Response) => {

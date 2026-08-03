@@ -7,15 +7,19 @@ import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { subscriptionService } from '../services/subscription.service';
 import { asyncHandler } from '../utils/asyncHandler';
 
+// bcrypt only hashes the first 72 bytes, so anything past that is not a
+// stronger password, just a bigger payload to move around.
+const MAX_PASSWORD_LENGTH = 72;
+
 const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-  name: z.string().min(2)
+  email: z.string().trim().email().max(254),
+  password: z.string().min(6).max(MAX_PASSWORD_LENGTH),
+  name: z.string().trim().min(2).max(100)
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string()
+  email: z.string().trim().email().max(254),
+  password: z.string().max(MAX_PASSWORD_LENGTH)
 });
 
 const generateEventCode = (): string => {

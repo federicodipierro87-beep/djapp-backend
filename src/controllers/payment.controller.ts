@@ -6,20 +6,26 @@ import { satispayService } from '../services/satispay.service';
 import prisma from '../utils/database';
 import { asyncHandler } from '../utils/asyncHandler';
 
+// These endpoints are unauthenticated by design (guests never log in), so the
+// amount is entirely attacker controlled and needs the same ceiling the request
+// schema uses. The currency reaches the payment providers verbatim.
+const MAX_AMOUNT = 1000;
+const currencySchema = z.string().trim().regex(/^[A-Za-z]{3}$/, 'Invalid currency code');
+
 const createStripeIntentSchema = z.object({
-  amount: z.number().min(0.01),
-  currency: z.string().default('eur')
+  amount: z.number().min(0.01).max(MAX_AMOUNT),
+  currency: currencySchema.default('eur')
 });
 
 const createPayPalOrderSchema = z.object({
-  amount: z.number().min(0.01),
-  currency: z.string().default('EUR')
+  amount: z.number().min(0.01).max(MAX_AMOUNT),
+  currency: currencySchema.default('EUR')
 });
 
 const createSatispayPaymentSchema = z.object({
-  amount: z.number().min(0.01),
-  currency: z.string().default('EUR'),
-  description: z.string().default('DJ Song Request')
+  amount: z.number().min(0.01).max(MAX_AMOUNT),
+  currency: currencySchema.default('EUR'),
+  description: z.string().trim().max(200).default('DJ Song Request')
 });
 
 export const createStripeIntent = asyncHandler(async (req: Request, res: Response) => {
