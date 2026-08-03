@@ -4,20 +4,54 @@ import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { eventService } from '../services/event.service';
 import { asyncHandler } from '../utils/asyncHandler';
 
-const createEventSchema = z.object({
+const HAS_UTC_OFFSET = /([Zz]|[+-]\d{2}:?\d{2})$/;
+
+/**
+ * A timestamp only denotes a moment if it says which zone it is in. Given a bare
+ * wall clock, new Date() resolves it against the server's zone - UTC in
+ * production - so a DJ's 21:00 would be stored as 21:00 UTC and read back to
+ * them as 23:00. Rejecting the ambiguous form is what keeps that from silently
+ * coming back.
+ */
+const toInstant = (value: string, ctx: z.RefinementCtx): Date => {
+  const trimmed = value.trim();
+
+  if (!HAS_UTC_OFFSET.test(trimmed)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Timestamp must carry a UTC offset, e.g. 2026-08-10T19:00:00.000Z'
+    });
+    return z.NEVER;
+  }
+
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Timestamp is not a valid date' });
+    return z.NEVER;
+  }
+
+  return date;
+};
+
+const optionalInstant = z
+  .string()
+  .optional()
+  .transform((str, ctx) => (str ? toInstant(str, ctx) : undefined));
+
+export const createEventSchema = z.object({
   name: z.string().trim().min(1, 'Event name is required').max(120),
   description: z.string().trim().max(1000).optional(),
   address: z.string().trim().min(1, 'Address is required').max(250),
-  dateTime: z.string().transform(str => new Date(str)),
-  endDateTime: z.string().optional().transform(str => str ? new Date(str) : undefined)
+  dateTime: z.string().transform(toInstant),
+  endDateTime: optionalInstant
 });
 
-const updateEventSchema = z.object({
+export const updateEventSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(1000).optional(),
   address: z.string().trim().min(1).max(250).optional(),
-  dateTime: z.string().optional().transform(str => str ? new Date(str) : undefined),
-  endDateTime: z.string().optional().transform(str => str ? new Date(str) : undefined)
+  dateTime: optionalInstant,
+  endDateTime: optionalInstant
 });
 
 const nearbyQuerySchema = z.object({
