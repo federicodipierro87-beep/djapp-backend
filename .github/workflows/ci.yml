@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      # prisma generate resolves the datasource url even though it never opens a
+      # connection, so a placeholder is enough. No test touches the database.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # The Prisma client is generated code: without this step nothing that
+      # imports it will typecheck.
+      - run: npx prisma generate
+
+      - run: npm run typecheck
+
+      - run: npm test
