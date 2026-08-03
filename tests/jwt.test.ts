@@ -1,7 +1,4 @@
-import { describe, expect, it } from 'vitest';
-
-process.env.JWT_SECRET = 'test-secret';
-
+import { describe, expect, it, vi } from 'vitest';
 import { generateToken, verifyToken } from '../src/utils/jwt';
 
 describe('jwt utils', () => {
@@ -26,5 +23,24 @@ describe('jwt utils', () => {
     const forged = jwt.default.sign({ djId: 'dj-1', email: 'dj@example.com' }, 'other-secret');
 
     expect(() => verifyToken(forged)).toThrow();
+  });
+});
+
+describe('startup guard', () => {
+  it('refuses to load without JWT_SECRET instead of picking a default', async () => {
+    const original = process.env.JWT_SECRET;
+    vi.resetModules();
+    // dotenv would repopulate the variable from a developer's local .env, which
+    // is precisely what must not decide the outcome here.
+    vi.doMock('dotenv', () => ({ default: { config: () => ({}) } }));
+    delete process.env.JWT_SECRET;
+
+    try {
+      await expect(import('../src/config/env')).rejects.toThrow(/JWT_SECRET/);
+    } finally {
+      process.env.JWT_SECRET = original;
+      vi.doUnmock('dotenv');
+      vi.resetModules();
+    }
   });
 });

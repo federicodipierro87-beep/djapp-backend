@@ -3,8 +3,6 @@ import type { AddressInfo } from 'net';
 import { io as createClient, Socket as ClientSocket } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-process.env.JWT_SECRET = 'test-secret';
-
 import { generateToken } from '../src/utils/jwt';
 import { emitNewRequest, emitToEvent, initializeSocket } from '../src/socket/socket';
 import { SOCKET_EVENTS } from '../src/socket/events';
