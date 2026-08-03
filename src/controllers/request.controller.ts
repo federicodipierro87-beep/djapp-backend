@@ -7,6 +7,7 @@ import { paypalService } from '../services/paypal.service';
 import { satispayService } from '../services/satispay.service';
 import { expirationService } from '../services/expiration.service';
 import { emitNewRequest, emitRequestAccepted, emitRequestRejected, emitQueueUpdated } from '../socket/socket';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const createRequestSchema = z.object({
   eventCode: z.string(),
@@ -22,7 +23,7 @@ const createRequestSchema = z.object({
   paymentIntentId: z.string().optional()
 });
 
-export const createRequest = async (req: Request, res: Response) => {
+export const createRequest = asyncHandler(async (req: Request, res: Response) => {
   try {
     const data = createRequestSchema.parse(req.body);
 
@@ -140,9 +141,9 @@ export const createRequest = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const getRequestsByEvent = async (req: Request, res: Response) => {
+export const getRequestsByEvent = asyncHandler(async (req: Request, res: Response) => {
   try {
     const { eventCode } = req.params;
 
@@ -196,9 +197,9 @@ export const getRequestsByEvent = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const getDJRequests = async (req: AuthenticatedRequest, res: Response) => {
+export const getDJRequests = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const requests = await prisma.request.findMany({
       where: { djId: req.dj!.djId },
@@ -230,9 +231,9 @@ export const getDJRequests = async (req: AuthenticatedRequest, res: Response) =>
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const acceptRequest = async (req: AuthenticatedRequest, res: Response) => {
+export const acceptRequest = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     console.log('Accept request called for ID:', req.params.id);
     const { id } = req.params;
@@ -291,9 +292,9 @@ export const acceptRequest = async (req: AuthenticatedRequest, res: Response) =>
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const rejectRequest = async (req: AuthenticatedRequest, res: Response) => {
+export const rejectRequest = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -348,4 +349,4 @@ export const rejectRequest = async (req: AuthenticatedRequest, res: Response) =>
   } catch (error) {
     throw error;
   }
-};
+});

@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import QRCode from 'qrcode';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const updateSettingsSchema = z.object({
   name: z.string().min(2).optional(),
@@ -20,7 +21,7 @@ const generateEventCode = (): string => {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 };
 
-export const getSettings = async (req: AuthenticatedRequest, res: Response) => {
+export const getSettings = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const dj = await prisma.dJ.findUnique({
       where: { id: req.dj!.djId }
@@ -48,9 +49,9 @@ export const getSettings = async (req: AuthenticatedRequest, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const updateSettings = async (req: AuthenticatedRequest, res: Response) => {
+export const updateSettings = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const updateData = updateSettingsSchema.parse(req.body);
 
@@ -78,7 +79,7 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
   } catch (error) {
     throw error;
   }
-};
+});
 
 const createEventSummary = async (djId: string, eventCode: string) => {
   // Trova l'ultimo evento per determinare quando è iniziato quello corrente
@@ -177,7 +178,7 @@ const createEventSummary = async (djId: string, eventCode: string) => {
   });
 };
 
-export const endCurrentEvent = async (req: AuthenticatedRequest, res: Response) => {
+export const endCurrentEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const dj = await prisma.dJ.findUnique({
       where: { id: req.dj!.djId }
@@ -216,9 +217,9 @@ export const endCurrentEvent = async (req: AuthenticatedRequest, res: Response) 
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const generateNewEventCode = async (req: AuthenticatedRequest, res: Response) => {
+export const generateNewEventCode = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const dj = await prisma.dJ.findUnique({
       where: { id: req.dj!.djId }
@@ -275,9 +276,9 @@ export const generateNewEventCode = async (req: AuthenticatedRequest, res: Respo
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const getEventSummaries = async (req: AuthenticatedRequest, res: Response) => {
+export const getEventSummaries = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const summaries = await prisma.eventSummary.findMany({
       where: { djId: req.dj!.djId },
@@ -288,9 +289,9 @@ export const getEventSummaries = async (req: AuthenticatedRequest, res: Response
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const deleteEventSummary = async (req: AuthenticatedRequest, res: Response) => {
+export const deleteEventSummary = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -310,9 +311,9 @@ export const deleteEventSummary = async (req: AuthenticatedRequest, res: Respons
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const getEventStats = async (req: AuthenticatedRequest, res: Response) => {
+export const getEventStats = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     // Trova l'ultimo evento terminato per filtrare solo le statistiche dell'evento corrente
     const lastEventSummary = await prisma.eventSummary.findFirst({
@@ -385,14 +386,14 @@ export const getEventStats = async (req: AuthenticatedRequest, res: Response) =>
   } catch (error) {
     throw error;
   }
-};
+});
 
 const changePasswordSchema = z.object({
   currentPassword: z.string(),
   newPassword: z.string().min(6)
 });
 
-export const changePassword = async (req: AuthenticatedRequest, res: Response) => {
+export const changePassword = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
 
@@ -423,9 +424,9 @@ export const changePassword = async (req: AuthenticatedRequest, res: Response) =
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const generateQRCode = async (req: AuthenticatedRequest, res: Response) => {
+export const generateQRCode = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const dj = await prisma.dJ.findUnique({
       where: { id: req.dj!.djId }
@@ -454,4 +455,4 @@ export const generateQRCode = async (req: AuthenticatedRequest, res: Response) =
   } catch (error) {
     throw error;
   }
-};
+});

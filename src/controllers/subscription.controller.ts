@@ -3,6 +3,7 @@ import { z } from 'zod';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { subscriptionService } from '../services/subscription.service';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const checkoutSchema = z.object({
   plan: z.enum(['MONTHLY', 'ANNUAL']),
@@ -14,7 +15,7 @@ const portalSchema = z.object({
   returnUrl: z.string().url()
 });
 
-export const createCheckoutSession = async (req: AuthenticatedRequest, res: Response) => {
+export const createCheckoutSession = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { plan, successUrl, cancelUrl } = checkoutSchema.parse(req.body);
     const djId = req.dj!.djId;
@@ -60,9 +61,9 @@ export const createCheckoutSession = async (req: AuthenticatedRequest, res: Resp
     console.error('Error creating checkout session:', error);
     throw error;
   }
-};
+});
 
-export const getSubscriptionStatus = async (req: AuthenticatedRequest, res: Response) => {
+export const getSubscriptionStatus = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const djId = req.dj!.djId;
     const status = await subscriptionService.getSubscriptionStatus(djId);
@@ -71,9 +72,9 @@ export const getSubscriptionStatus = async (req: AuthenticatedRequest, res: Resp
     console.error('Error getting subscription status:', error);
     throw error;
   }
-};
+});
 
-export const createPortalSession = async (req: AuthenticatedRequest, res: Response) => {
+export const createPortalSession = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { returnUrl } = portalSchema.parse(req.body);
     const djId = req.dj!.djId;
@@ -100,9 +101,9 @@ export const createPortalSession = async (req: AuthenticatedRequest, res: Respon
     console.error('Error creating portal session:', error);
     throw error;
   }
-};
+});
 
-export const cancelSubscription = async (req: AuthenticatedRequest, res: Response) => {
+export const cancelSubscription = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const djId = req.dj!.djId;
 
@@ -130,9 +131,9 @@ export const cancelSubscription = async (req: AuthenticatedRequest, res: Respons
     console.error('Error canceling subscription:', error);
     throw error;
   }
-};
+});
 
-export const reactivateSubscription = async (req: AuthenticatedRequest, res: Response) => {
+export const reactivateSubscription = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const djId = req.dj!.djId;
 
@@ -163,9 +164,9 @@ export const reactivateSubscription = async (req: AuthenticatedRequest, res: Res
     console.error('Error reactivating subscription:', error);
     throw error;
   }
-};
+});
 
-export const handleWebhook = async (req: Request, res: Response) => {
+export const handleWebhook = asyncHandler(async (req: Request, res: Response) => {
   const signature = req.headers['stripe-signature'] as string;
 
   if (!signature) {
@@ -212,4 +213,4 @@ export const handleWebhook = async (req: Request, res: Response) => {
     console.error('Webhook error:', error.message);
     return res.status(400).json({ error: `Webhook Error: ${error.message}` });
   }
-};
+});

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { eventService } from '../services/event.service';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const createEventSchema = z.object({
   name: z.string().min(1, 'Event name is required'),
@@ -26,7 +27,7 @@ const nearbyQuerySchema = z.object({
   status: z.enum(['ACTIVE', 'SCHEDULED']).optional().default('ACTIVE')
 });
 
-export const createEvent = async (req: AuthenticatedRequest, res: Response) => {
+export const createEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = createEventSchema.parse(req.body);
     const djId = req.dj!.djId;
@@ -50,9 +51,9 @@ export const createEvent = async (req: AuthenticatedRequest, res: Response) => {
     }
     throw error;
   }
-};
+});
 
-export const getMyEvents = async (req: AuthenticatedRequest, res: Response) => {
+export const getMyEvents = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const djId = req.dj!.djId;
     const events = await eventService.getEventsByDj(djId);
@@ -60,9 +61,9 @@ export const getMyEvents = async (req: AuthenticatedRequest, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const getNearbyEvents = async (req: Request, res: Response) => {
+export const getNearbyEvents = asyncHandler(async (req: Request, res: Response) => {
   try {
     const query = nearbyQuerySchema.parse(req.query);
 
@@ -85,9 +86,9 @@ export const getNearbyEvents = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const getEventByCode = async (req: Request, res: Response) => {
+export const getEventByCode = asyncHandler(async (req: Request, res: Response) => {
   try {
     const { eventCode } = req.params;
     const event = await eventService.getEventByCode(eventCode);
@@ -100,9 +101,9 @@ export const getEventByCode = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const updateEvent = async (req: AuthenticatedRequest, res: Response) => {
+export const updateEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
     const djId = req.dj!.djId;
@@ -125,9 +126,9 @@ export const updateEvent = async (req: AuthenticatedRequest, res: Response) => {
     }
     throw error;
   }
-};
+});
 
-export const activateEvent = async (req: AuthenticatedRequest, res: Response) => {
+export const activateEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
     const djId = req.dj!.djId;
@@ -146,9 +147,9 @@ export const activateEvent = async (req: AuthenticatedRequest, res: Response) =>
     }
     throw error;
   }
-};
+});
 
-export const endEvent = async (req: AuthenticatedRequest, res: Response) => {
+export const endEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
     const djId = req.dj!.djId;
@@ -167,9 +168,9 @@ export const endEvent = async (req: AuthenticatedRequest, res: Response) => {
     }
     throw error;
   }
-};
+});
 
-export const cancelEvent = async (req: AuthenticatedRequest, res: Response) => {
+export const cancelEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
     const djId = req.dj!.djId;
@@ -188,9 +189,9 @@ export const cancelEvent = async (req: AuthenticatedRequest, res: Response) => {
     }
     throw error;
   }
-};
+});
 
-export const deleteEvent = async (req: AuthenticatedRequest, res: Response) => {
+export const deleteEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
     const djId = req.dj!.djId;
@@ -209,4 +210,4 @@ export const deleteEvent = async (req: AuthenticatedRequest, res: Response) => {
     }
     throw error;
   }
-};
+});

@@ -4,6 +4,7 @@ import { stripeService } from '../services/stripe.service';
 import { paypalService } from '../services/paypal.service';
 import { satispayService } from '../services/satispay.service';
 import prisma from '../utils/database';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const createStripeIntentSchema = z.object({
   amount: z.number().min(0.01),
@@ -21,7 +22,7 @@ const createSatispayPaymentSchema = z.object({
   description: z.string().default('DJ Song Request')
 });
 
-export const createStripeIntent = async (req: Request, res: Response) => {
+export const createStripeIntent = asyncHandler(async (req: Request, res: Response) => {
   try {
     const { amount, currency } = createStripeIntentSchema.parse(req.body);
     
@@ -34,9 +35,9 @@ export const createStripeIntent = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const createPayPalOrder = async (req: Request, res: Response) => {
+export const createPayPalOrder = asyncHandler(async (req: Request, res: Response) => {
   try {
     const { amount, currency } = createPayPalOrderSchema.parse(req.body);
     
@@ -49,9 +50,9 @@ export const createPayPalOrder = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const createSatispayPayment = async (req: Request, res: Response) => {
+export const createSatispayPayment = asyncHandler(async (req: Request, res: Response) => {
   try {
     const { amount, currency, description } = createSatispayPaymentSchema.parse(req.body);
     
@@ -64,9 +65,9 @@ export const createSatispayPayment = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const stripeWebhook = async (req: Request, res: Response) => {
+export const stripeWebhook = asyncHandler(async (req: Request, res: Response) => {
   try {
     const signature = req.headers['stripe-signature'] as string;
     const event = await stripeService.constructEvent(req.body, signature);
@@ -96,9 +97,9 @@ export const stripeWebhook = async (req: Request, res: Response) => {
     console.error('Stripe webhook error:', error);
     res.status(400).json({ error: 'Invalid webhook' });
   }
-};
+});
 
-export const paypalWebhook = async (req: Request, res: Response) => {
+export const paypalWebhook = asyncHandler(async (req: Request, res: Response) => {
   try {
     const event = req.body;
 
@@ -124,4 +125,4 @@ export const paypalWebhook = async (req: Request, res: Response) => {
     console.error('PayPal webhook error:', error);
     res.status(400).json({ error: 'Invalid webhook' });
   }
-};
+});

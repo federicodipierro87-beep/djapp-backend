@@ -6,12 +6,13 @@ import { stripeService } from '../services/stripe.service';
 import { paypalService } from '../services/paypal.service';
 import { satispayService } from '../services/satispay.service';
 import { emitQueueUpdated, emitNowPlayingChanged } from '../socket/socket';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const reorderSchema = z.object({
   queueItemIds: z.array(z.string())
 });
 
-export const getPublicQueue = async (req: Request, res: Response) => {
+export const getPublicQueue = asyncHandler(async (req: Request, res: Response) => {
   try {
     const { eventCode } = req.params;
 
@@ -75,9 +76,9 @@ export const getPublicQueue = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const getDJQueue = async (req: AuthenticatedRequest, res: Response) => {
+export const getDJQueue = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const queueItems = await prisma.queueItem.findMany({
       where: { djId: req.dj!.djId },
@@ -130,9 +131,9 @@ export const getDJQueue = async (req: AuthenticatedRequest, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const reorderQueue = async (req: AuthenticatedRequest, res: Response) => {
+export const reorderQueue = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { queueItemIds } = reorderSchema.parse(req.body);
 
@@ -161,9 +162,9 @@ export const reorderQueue = async (req: AuthenticatedRequest, res: Response) => 
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const setNowPlaying = async (req: AuthenticatedRequest, res: Response) => {
+export const setNowPlaying = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -206,9 +207,9 @@ export const setNowPlaying = async (req: AuthenticatedRequest, res: Response) =>
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const markAsPlayed = async (req: AuthenticatedRequest, res: Response) => {
+export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -286,9 +287,9 @@ export const markAsPlayed = async (req: AuthenticatedRequest, res: Response) => 
     console.error('Error in markAsPlayed:', error);
     throw error;
   }
-};
+});
 
-export const skipSong = async (req: AuthenticatedRequest, res: Response) => {
+export const skipSong = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -365,4 +366,4 @@ export const skipSong = async (req: AuthenticatedRequest, res: Response) => {
     console.error('Error in skipSong:', error);
     throw error;
   }
-};
+});

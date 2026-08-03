@@ -5,6 +5,7 @@ import prisma from '../utils/database';
 import { generateToken } from '../utils/jwt';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { subscriptionService } from '../services/subscription.service';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -21,7 +22,7 @@ const generateEventCode = (): string => {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 };
 
-export const register = async (req: Request, res: Response) => {
+export const register = asyncHandler(async (req: Request, res: Response) => {
   try {
     const { email, password, name } = registerSchema.parse(req.body);
     
@@ -60,9 +61,9 @@ export const register = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const login = async (req: Request, res: Response) => {
+export const login = asyncHandler(async (req: Request, res: Response) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
 
@@ -132,9 +133,9 @@ export const login = async (req: Request, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});
 
-export const me = async (req: AuthenticatedRequest, res: Response) => {
+export const me = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const dj = await prisma.dJ.findUnique({
       where: { id: req.dj!.djId }
@@ -159,4 +160,4 @@ export const me = async (req: AuthenticatedRequest, res: Response) => {
   } catch (error) {
     throw error;
   }
-};
+});

@@ -6,6 +6,7 @@ import {
   SpotifyRateLimitError,
   SpotifyUnavailableError,
 } from '../services/spotify.service';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const searchSchema = z.object({
   q: z.string().trim().min(1, 'Search query is required').max(200),
@@ -31,7 +32,7 @@ const handleSpotifyError = (error: unknown, res: Response, next: NextFunction) =
   return next(error);
 };
 
-export const searchTracks = async (req: Request, res: Response, next: NextFunction) => {
+export const searchTracks = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { q, limit, offset } = searchSchema.parse(req.query);
 
@@ -41,9 +42,9 @@ export const searchTracks = async (req: Request, res: Response, next: NextFuncti
   } catch (error) {
     handleSpotifyError(error, res, next);
   }
-};
+});
 
-export const getTrack = async (req: Request, res: Response, next: NextFunction) => {
+export const getTrack = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   try {
     const trackId = trackIdSchema.parse(req.params.trackId);
 
@@ -53,4 +54,4 @@ export const getTrack = async (req: Request, res: Response, next: NextFunction) 
   } catch (error) {
     handleSpotifyError(error, res, next);
   }
-};
+});

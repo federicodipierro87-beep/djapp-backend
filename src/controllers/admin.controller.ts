@@ -3,8 +3,9 @@ import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { EmailService } from '../services/email.service';
 import { subscriptionService } from '../services/subscription.service';
+import { asyncHandler } from '../utils/asyncHandler';
 
-export const getPendingDJs = async (req: AuthenticatedRequest, res: Response) => {
+export const getPendingDJs = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const pendingDJs = await prisma.dJ.findMany({
       where: {
@@ -28,9 +29,9 @@ export const getPendingDJs = async (req: AuthenticatedRequest, res: Response) =>
     console.error('Error fetching pending DJs:', error);
     res.status(500).json({ error: 'Errore nel recupero delle richieste' });
   }
-};
+});
 
-export const getAllDJs = async (req: AuthenticatedRequest, res: Response) => {
+export const getAllDJs = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const allDJs = await prisma.dJ.findMany({
       where: {
@@ -54,9 +55,9 @@ export const getAllDJs = async (req: AuthenticatedRequest, res: Response) => {
     console.error('Error fetching all DJs:', error);
     res.status(500).json({ error: 'Errore nel recupero dei DJ' });
   }
-};
+});
 
-export const approveDJ = async (req: AuthenticatedRequest, res: Response) => {
+export const approveDJ = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { djId } = req.params;
 
@@ -98,9 +99,9 @@ export const approveDJ = async (req: AuthenticatedRequest, res: Response) => {
     console.error('Error approving DJ:', error);
     res.status(500).json({ error: 'Errore nell\'approvazione del DJ' });
   }
-};
+});
 
-export const rejectDJ = async (req: AuthenticatedRequest, res: Response) => {
+export const rejectDJ = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { djId } = req.params;
 
@@ -131,9 +132,9 @@ export const rejectDJ = async (req: AuthenticatedRequest, res: Response) => {
     console.error('Error rejecting DJ:', error);
     res.status(500).json({ error: 'Errore nel respingere il DJ' });
   }
-};
+});
 
-export const deleteDJ = async (req: AuthenticatedRequest, res: Response) => {
+export const deleteDJ = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { djId } = req.params;
 
@@ -192,4 +193,4 @@ export const deleteDJ = async (req: AuthenticatedRequest, res: Response) => {
     console.error('Error deleting DJ:', error);
     res.status(500).json({ error: 'Errore nella cancellazione del DJ' });
   }
-};
+});
