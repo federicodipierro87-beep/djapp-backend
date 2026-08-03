@@ -40,10 +40,33 @@ describe('event timestamps', () => {
     );
   });
 
-  it('reads a missing or blank end date as absent', () => {
+  it('reads a missing end date as absent when creating', () => {
     expect(createEventSchema.parse({ ...base, dateTime: SAME_MOMENT_UTC }).endDateTime).toBeUndefined();
-    expect(
-      createEventSchema.parse({ ...base, dateTime: SAME_MOMENT_UTC, endDateTime: '' }).endDateTime
-    ).toBeUndefined();
+  });
+});
+
+describe('clearing the end date', () => {
+  // Prisma skips undefined and writes null, so these three cases are the whole
+  // difference between "leave it alone" and "the DJ took it back".
+  it('leaves the stored end date alone when the field is not sent', () => {
+    expect(updateEventSchema.parse({ name: 'Altro nome' }).endDateTime).toBeUndefined();
+  });
+
+  it('clears it on an explicit null', () => {
+    expect(updateEventSchema.parse({ endDateTime: null }).endDateTime).toBeNull();
+  });
+
+  it('clears it on a blank string, which is what an emptied field sends', () => {
+    expect(updateEventSchema.parse({ endDateTime: '' }).endDateTime).toBeNull();
+  });
+
+  it('still sets it when a real instant is sent', () => {
+    expect(updateEventSchema.parse({ endDateTime: SAME_MOMENT_UTC }).endDateTime).toEqual(
+      new Date(SAME_MOMENT_UTC)
+    );
+  });
+
+  it('does not let the same blank clear the start date, which cannot be null', () => {
+    expect(updateEventSchema.parse({ dateTime: '' }).dateTime).toBeUndefined();
   });
 });

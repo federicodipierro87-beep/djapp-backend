@@ -14,7 +14,7 @@ interface CreateEventData {
   description?: string;
   address: string;
   dateTime: Date;
-  endDateTime?: Date;
+  endDateTime?: Date | null;
 }
 
 interface UpdateEventData {
@@ -22,7 +22,8 @@ interface UpdateEventData {
   description?: string;
   address?: string;
   dateTime?: Date;
-  endDateTime?: Date;
+  /** null clears the stored end date; undefined leaves it untouched. */
+  endDateTime?: Date | null;
 }
 
 function generateEventCode(): string {

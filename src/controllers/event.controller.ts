@@ -38,12 +38,26 @@ const optionalInstant = z
   .optional()
   .transform((str, ctx) => (str ? toInstant(str, ctx) : undefined));
 
+/**
+ * An end date is the one timestamp a DJ can take back, so absent and empty have
+ * to mean different things: a PATCH that simply omits the field must leave it
+ * alone, while an explicit null or blank is a request to clear it. Prisma skips
+ * undefined, so only the null actually reaches the column.
+ */
+const clearableInstant = z
+  .string()
+  .nullish()
+  .transform((value, ctx) => {
+    if (value === undefined) return undefined;
+    return value ? toInstant(value, ctx) : null;
+  });
+
 export const createEventSchema = z.object({
   name: z.string().trim().min(1, 'Event name is required').max(120),
   description: z.string().trim().max(1000).optional(),
   address: z.string().trim().min(1, 'Address is required').max(250),
   dateTime: z.string().transform(toInstant),
-  endDateTime: optionalInstant
+  endDateTime: clearableInstant
 });
 
 export const updateEventSchema = z.object({
@@ -51,7 +65,7 @@ export const updateEventSchema = z.object({
   description: z.string().trim().max(1000).optional(),
   address: z.string().trim().min(1).max(250).optional(),
   dateTime: optionalInstant,
-  endDateTime: optionalInstant
+  endDateTime: clearableInstant
 });
 
 const nearbyQuerySchema = z.object({
