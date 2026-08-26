@@ -4,6 +4,7 @@ import {
   getMyEvents,
   getNearbyEvents,
   getEventByCode,
+  getPublicEventInfo,
   updateEvent,
   activateEvent,
   endEvent,
@@ -18,6 +19,7 @@ const router = express.Router();
 // Public routes
 router.get('/nearby', getNearbyEvents);
 router.get('/code/:eventCode', getEventByCode);
+router.get('/public/:eventCode', getPublicEventInfo);
 
 // Authenticated DJ routes
 router.post('/', authMiddleware, subscriptionMiddleware, createEvent);

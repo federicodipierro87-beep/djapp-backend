@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { eventService } from '../services/event.service';
 import { asyncHandler } from '../utils/asyncHandler';
+import prisma from '../utils/database';
 
 const HAS_UTC_OFFSET = /([Zz]|[+-]\d{2}:?\d{2})$/;
 
@@ -149,6 +150,42 @@ export const getEventByCode = asyncHandler(async (req: Request, res: Response) =
   } catch (error) {
     throw error;
   }
+});
+
+// Everything a guest needs before filing a request, for both the new Event
+// codes and the legacy per-DJ codes. Deliberately narrow: it is unauthenticated
+// and reachable by anyone holding a code.
+export const getPublicEventInfo = asyncHandler(async (req: Request, res: Response) => {
+  const { eventCode } = req.params;
+
+  const event = await eventService.getEventByCode(eventCode);
+
+  if (event) {
+    return res.json({
+      eventCode: event.eventCode,
+      eventName: event.name,
+      djName: event.dj.name,
+      minDonation: event.dj.minDonation.toNumber(),
+      isAcceptingRequests: event.status === 'ACTIVE'
+    });
+  }
+
+  const dj = await prisma.dJ.findUnique({
+    where: { eventCode },
+    select: { name: true, eventCode: true, minDonation: true }
+  });
+
+  if (!dj) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+
+  res.json({
+    eventCode: dj.eventCode,
+    eventName: null,
+    djName: dj.name,
+    minDonation: dj.minDonation.toNumber(),
+    isAcceptingRequests: true
+  });
 });
 
 export const updateEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

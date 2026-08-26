@@ -1,14 +1,29 @@
 import cron from 'node-cron';
+import { Prisma } from '@prisma/client';
 import prisma from '../utils/database';
 import { stripeService } from './stripe.service';
 import { paypalService } from './paypal.service';
 import { satispayService } from './satispay.service';
 
-const EXPIRATION_MINUTES = 180;
+export const EXPIRATION_MINUTES = 180;
+export const EXPIRATION_MS = EXPIRATION_MINUTES * 60 * 1000;
+
+// Only the columns this service actually reads. Widening it later is a compile
+// error rather than a silent `any` access.
+type ExpirableRequest = Prisma.RequestGetPayload<{
+  select: {
+    id: true;
+    songTitle: true;
+    paymentMethod: true;
+    paymentIntentId: true;
+  };
+}>;
 
 export class ExpirationService {
+  private task: cron.ScheduledTask | null = null;
+
   start() {
-    cron.schedule('* * * * *', async () => {
+    this.task = cron.schedule('* * * * *', async () => {
       try {
         await this.expireOldRequests();
       } catch (error) {
@@ -19,26 +34,46 @@ export class ExpirationService {
     console.log('Expiration service started - checking every minute');
   }
 
+  stop() {
+    this.task?.stop();
+    this.task = null;
+  }
+
   private async expireOldRequests() {
-    const expirationTime = new Date(Date.now() - EXPIRATION_MINUTES * 60 * 1000);
-    
-    const expiredRequests = await prisma.request.findMany({
+    const expirationTime = new Date(Date.now() - EXPIRATION_MS);
+
+    const candidates = await prisma.request.findMany({
       where: {
         status: 'PENDING',
         createdAt: { lt: expirationTime }
+      },
+      select: {
+        id: true,
+        songTitle: true,
+        paymentMethod: true,
+        paymentIntentId: true
       }
     });
 
-    console.log(`Found ${expiredRequests.length} expired requests`);
+    if (candidates.length === 0) return;
 
-    for (const request of expiredRequests) {
+    console.log(`Found ${candidates.length} candidate requests to expire`);
+
+    for (const request of candidates) {
       try {
-        await this.cancelPaymentByMethod(request);
-        
-        await prisma.request.update({
-          where: { id: request.id },
+        // Claim the row first. If the DJ accepted it in the meantime the status
+        // is no longer PENDING, no row is updated, and we must not touch the
+        // authorisation the queue still depends on.
+        const claimed = await prisma.request.updateMany({
+          where: { id: request.id, status: 'PENDING' },
           data: { status: 'EXPIRED' }
         });
+
+        if (claimed.count !== 1) {
+          continue;
+        }
+
+        await this.cancelPaymentByMethod(request);
 
         console.log(`Expired request ${request.id} for song "${request.songTitle}"`);
       } catch (error) {
@@ -47,9 +82,8 @@ export class ExpirationService {
     }
   }
 
-  private async cancelPaymentByMethod(request: any) {
+  private async cancelPaymentByMethod(request: ExpirableRequest) {
     if (!request.paymentIntentId) {
-      console.log(`No payment intent ID for request ${request.id}`);
       return;
     }
 
@@ -60,25 +94,28 @@ export class ExpirationService {
         await stripeService.cancelPaymentIntent(request.paymentIntentId);
         console.log(`Cancelled Stripe payment ${request.paymentIntentId}`);
         break;
-      
+
       case 'PAYPAL':
         await paypalService.voidAuthorization(request.paymentIntentId);
         console.log(`Voided PayPal authorization ${request.paymentIntentId}`);
         break;
-      
+
       case 'SATISPAY':
         await satispayService.cancelPayment(request.paymentIntentId);
         console.log(`Cancelled Satispay payment ${request.paymentIntentId}`);
         break;
-      
+
       default:
         console.warn(`Unknown payment method: ${request.paymentMethod}`);
     }
   }
 
+  expiresAt(createdAt: Date): Date {
+    return new Date(createdAt.getTime() + EXPIRATION_MS);
+  }
+
   async getTimeRemaining(createdAt: Date): Promise<number> {
-    const expiry = new Date(createdAt.getTime() + EXPIRATION_MINUTES * 60 * 1000);
-    return Math.max(0, expiry.getTime() - Date.now());
+    return Math.max(0, this.expiresAt(createdAt).getTime() - Date.now());
   }
 
   async isExpired(createdAt: Date): Promise<boolean> {
