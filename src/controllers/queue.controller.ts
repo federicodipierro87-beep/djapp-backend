@@ -7,6 +7,7 @@ import { stripeService } from '../services/stripe.service';
 import { paypalService } from '../services/paypal.service';
 import { satispayService } from '../services/satispay.service';
 import { emitQueueUpdated, emitNowPlayingChanged } from '../socket/socket';
+import { broadcastCode } from '../socket/broadcastCode';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const reorderSchema = z.object({
@@ -143,13 +144,21 @@ export const reorderQueue = asyncHandler(async (req: AuthenticatedRequest, res: 
     )
   );
 
-  // Get DJ's eventCode for socket emission
-  const dj = await prisma.dJ.findUnique({
-    where: { id: req.dj!.djId },
-    select: { eventCode: true }
-  });
-  if (dj) {
-    emitQueueUpdated(dj.eventCode);
+  // Every reordered item belongs to the same queue, so any one of them names
+  // the room to refresh.
+  const moved = queueItemIds[0]
+    ? await prisma.queueItem.findUnique({
+        where: { id: queueItemIds[0] },
+        select: {
+          dj: { select: { eventCode: true } },
+          event: { select: { eventCode: true } }
+        }
+      })
+    : null;
+
+  const code = moved && broadcastCode(moved);
+  if (code) {
+    emitQueueUpdated(code);
   }
 
   res.json({ message: 'Queue reordered successfully' });
@@ -181,16 +190,18 @@ export const setNowPlaying = asyncHandler(async (req: AuthenticatedRequest, res:
     where: { id },
     include: {
       request: { select: { songTitle: true, artistName: true } },
-      dj: { select: { eventCode: true } }
+      dj: { select: { eventCode: true } },
+      event: { select: { eventCode: true } }
     }
   });
 
-  if (queueItem) {
-    emitNowPlayingChanged(queueItem.dj.eventCode, {
+  const code = queueItem && broadcastCode(queueItem);
+  if (queueItem && code) {
+    emitNowPlayingChanged(code, {
       songTitle: queueItem.request.songTitle,
       artistName: queueItem.request.artistName
     });
-    emitQueueUpdated(queueItem.dj.eventCode);
+    emitQueueUpdated(code);
   }
 
   res.json({ message: 'Song set as now playing' });
@@ -206,7 +217,9 @@ export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: 
       djId: req.dj!.djId
     },
     include: {
-      request: true
+      request: true,
+      dj: { select: { eventCode: true } },
+      event: { select: { eventCode: true } }
     }
   });
 
@@ -278,13 +291,9 @@ export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: 
       : { paymentStatus: 'CAPTURED', capturedAt: new Date() }
   });
 
-  // Get DJ's eventCode for socket emission
-  const dj = await prisma.dJ.findUnique({
-    where: { id: req.dj!.djId },
-    select: { eventCode: true }
-  });
-  if (dj) {
-    emitQueueUpdated(dj.eventCode);
+  const code = broadcastCode(queueItem);
+  if (code) {
+    emitQueueUpdated(code);
   }
 
   res.json({
@@ -306,7 +315,9 @@ export const skipSong = asyncHandler(async (req: AuthenticatedRequest, res: Resp
       djId: req.dj!.djId
     },
     include: {
-      request: true
+      request: true,
+      dj: { select: { eventCode: true } },
+      event: { select: { eventCode: true } }
     }
   });
 
@@ -376,13 +387,9 @@ export const skipSong = asyncHandler(async (req: AuthenticatedRequest, res: Resp
     });
   }
 
-  // Get DJ's eventCode for socket emission
-  const dj = await prisma.dJ.findUnique({
-    where: { id: req.dj!.djId },
-    select: { eventCode: true }
-  });
-  if (dj) {
-    emitQueueUpdated(dj.eventCode);
+  const code = broadcastCode(queueItem);
+  if (code) {
+    emitQueueUpdated(code);
   }
 
   res.json({
