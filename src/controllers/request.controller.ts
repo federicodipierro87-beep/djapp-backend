@@ -7,6 +7,13 @@ import { stripeService } from '../services/stripe.service';
 import { paypalService } from '../services/paypal.service';
 import { satispayService } from '../services/satispay.service';
 import { expirationService } from '../services/expiration.service';
+import {
+  confirmRequestPayment,
+  createAuthorization,
+  readAuthorization,
+  toCents
+} from '../services/requestPayment.service';
+import { CURRENCY, isPaymentMethodEnabled, providerFor } from '../config/payments';
 import { emitNewRequest, emitRequestAccepted, emitRequestRejected, emitQueueUpdated } from '../socket/socket';
 import { asyncHandler } from '../utils/asyncHandler';
 
@@ -24,97 +31,168 @@ export const createRequestSchema = z.object({
   paymentMethod: z.enum(['CARD', 'APPLE_PAY', 'GOOGLE_PAY', 'PAYPAL', 'SATISPAY'])
 });
 
-export const createRequest = asyncHandler(async (req: Request, res: Response) => {
-  const data = createRequestSchema.parse(req.body);
-
-  let djId: string;
-  // Never taken from the body: a guest who knows one event code could otherwise
-  // file the request against a different event belonging to another DJ.
-  let eventId: string | null = null;
-  let minDonation: number;
-
-  // First try to find in events table (new system)
+// An event code can belong to the Event table or, for older accounts, straight
+// to the DJ. Every public entry point has to resolve both.
+async function resolveEventCode(eventCode: string) {
   const event = await prisma.event.findUnique({
-    where: { eventCode: data.eventCode },
+    where: { eventCode },
     include: { dj: true }
   });
 
   if (event) {
-    // Found in events table
-    if (event.status !== 'ACTIVE') {
-      return res.status(400).json({ error: 'Event is not active' });
-    }
-    djId = event.djId;
-    eventId = event.id;
-    minDonation = event.dj.minDonation.toNumber();
-  } else {
-    // Fallback: try to find in djs table (legacy system)
-    const dj = await prisma.dJ.findUnique({
-      where: { eventCode: data.eventCode }
-    });
-
-    if (!dj) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-    djId = dj.id;
-    minDonation = dj.minDonation.toNumber();
+    return {
+      djId: event.djId,
+      // Never taken from the body: a guest who knows one event code could
+      // otherwise file the request against another DJ's night.
+      eventId: event.id as string | null,
+      minDonation: event.dj.minDonation.toNumber(),
+      isActive: event.status === 'ACTIVE'
+    };
   }
 
-  if (data.donationAmount < minDonation) {
+  const dj = await prisma.dJ.findUnique({ where: { eventCode } });
+  if (!dj) return null;
+
+  return {
+    djId: dj.id,
+    eventId: null,
+    minDonation: dj.minDonation.toNumber(),
+    isActive: true
+  };
+}
+
+export const createRequest = asyncHandler(async (req: Request, res: Response) => {
+  const data = createRequestSchema.parse(req.body);
+
+  // Transition shim. Clients loaded before this deploy pay first and then post
+  // the authorisation they made themselves. The id is still not trusted - it is
+  // checked against Stripe below - but honouring it keeps those tabs working
+  // instead of double-authorising the guest's card. Delete once they are gone.
+  const legacyPaymentIntentId =
+    typeof req.body?.paymentIntentId === 'string' ? req.body.paymentIntentId : undefined;
+
+  if (!isPaymentMethodEnabled(data.paymentMethod)) {
+    return res.status(400).json({ error: 'This payment method is not available' });
+  }
+
+  const target = await resolveEventCode(data.eventCode);
+
+  if (!target) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+
+  if (!target.isActive) {
+    return res.status(400).json({ error: 'Event is not active' });
+  }
+
+  if (data.donationAmount < target.minDonation) {
     return res.status(400).json({
-      error: `Minimum donation is €${minDonation}`,
-      minDonation
+      error: `Minimum donation is €${target.minDonation}`,
+      minDonation: target.minDonation
     });
   }
 
-  // The authorisation is always created here, for the amount the server just
-  // validated. A caller cannot hand us an id of a payment we never made.
-  let paymentIntentId: string | null = null;
-  let clientSecret: string | null = null;
+  const provider = providerFor(data.paymentMethod);
 
-  switch (data.paymentMethod) {
-    case 'CARD':
-    case 'APPLE_PAY':
-    case 'GOOGLE_PAY': {
-      const paymentIntent = await stripeService.createPaymentIntent(data.donationAmount);
-      paymentIntentId = paymentIntent.id;
-      clientSecret = paymentIntent.client_secret;
-      break;
-    }
+  const common = {
+    songTitle: data.songTitle,
+    artistName: data.artistName,
+    spotifyTrackId: data.spotifyTrackId,
+    albumCover: data.albumCover,
+    requesterName: data.requesterName,
+    requesterEmail: data.requesterEmail,
+    donationAmount: data.donationAmount,
+    paymentMethod: data.paymentMethod,
+    paymentProvider: provider,
+    djId: target.djId,
+    eventId: target.eventId
+  };
 
-    case 'PAYPAL': {
-      const order = await paypalService.createOrder(data.donationAmount);
-      paymentIntentId = order.id;
-      break;
-    }
-
-    case 'SATISPAY': {
-      const payment = await satispayService.createPayment(data.donationAmount);
-      paymentIntentId = payment.id;
-      break;
-    }
+  if (legacyPaymentIntentId) {
+    return createRequestFromExistingAuthorization(res, common, legacyPaymentIntentId);
   }
 
+  // The request comes first and stays invisible to the DJ until the provider
+  // says the money is really on hold.
   const request = await prisma.request.create({
-    data: {
-      songTitle: data.songTitle,
-      artistName: data.artistName,
-      spotifyTrackId: data.spotifyTrackId,
-      albumCover: data.albumCover,
-      requesterName: data.requesterName,
-      requesterEmail: data.requesterEmail,
-      donationAmount: data.donationAmount,
-      paymentMethod: data.paymentMethod,
-      paymentIntentId,
-      djId,
-      eventId
-    }
+    data: { ...common, status: 'AWAITING_PAYMENT', paymentStatus: 'PENDING' }
   });
 
-  const timeRemaining = await expirationService.getTimeRemaining(request.createdAt);
+  let payment;
+  try {
+    payment = await createAuthorization(provider, request.id, data.donationAmount);
+  } catch (error) {
+    // A request with no way to pay for it is litter: nobody can confirm it and
+    // the DJ will never see it.
+    await prisma.request.delete({ where: { id: request.id } }).catch(() => undefined);
+    throw error;
+  }
 
-  // Emit socket event for new request
-  emitNewRequest(djId, {
+  await prisma.request.update({
+    where: { id: request.id },
+    data: { paymentIntentId: payment.paymentIntentId }
+  });
+
+  res.status(201).json({
+    requestId: request.id,
+    status: 'AWAITING_PAYMENT',
+    payment: {
+      provider: payment.provider,
+      clientSecret: payment.clientSecret ?? null,
+      approvalUrl: payment.approvalUrl ?? null,
+      redirectUrl: payment.redirectUrl ?? null
+    },
+    expiresAt: expirationService.expiresAt(request.createdAt),
+    createdAt: request.createdAt
+  });
+});
+
+// Transition shim, see createRequest. Verifies with Stripe that the id names a
+// real, authorised, correctly priced hold before adopting it.
+async function createRequestFromExistingAuthorization(
+  res: Response,
+  common: Omit<Prisma.RequestUncheckedCreateInput, 'id'>,
+  paymentIntentId: string
+) {
+  if (common.paymentProvider !== 'STRIPE') {
+    return res.status(400).json({ error: 'Unsupported payment' });
+  }
+
+  const authorization = await readAuthorization('STRIPE', paymentIntentId).catch(() => null);
+
+  if (
+    !authorization ||
+    !authorization.authorized ||
+    authorization.currency.toLowerCase() !== CURRENCY ||
+    authorization.amountInCents < toCents(Number(common.donationAmount))
+  ) {
+    return res.status(400).json({ error: 'The payment has not been authorised' });
+  }
+
+  // The unique index on paymentIntentId is what stops one hold from being spent
+  // on several songs; a replay lands here.
+  const request = await prisma.request
+    .create({
+      data: {
+        ...common,
+        paymentIntentId,
+        status: 'PENDING',
+        paymentStatus: 'AUTHORIZED',
+        authorizedAt: new Date()
+      }
+    })
+    .catch((error: unknown) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return null;
+      }
+      throw error;
+    });
+
+  if (!request) {
+    return res.status(409).json({ error: 'This payment has already been used' });
+  }
+
+  emitNewRequest(request.djId, {
     id: request.id,
     songTitle: request.songTitle,
     artistName: request.artistName,
@@ -127,6 +205,7 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
 
   res.status(201).json({
     id: request.id,
+    requestId: request.id,
     songTitle: request.songTitle,
     artistName: request.artistName,
     spotifyTrackId: request.spotifyTrackId,
@@ -135,11 +214,33 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
     donationAmount: request.donationAmount,
     status: request.status,
     paymentIntentId,
-    clientSecret,
-    timeRemaining,
+    clientSecret: null,
+    timeRemaining: await expirationService.getTimeRemaining(request.createdAt),
     expiresAt: expirationService.expiresAt(request.createdAt),
     createdAt: request.createdAt
   });
+}
+
+// Called by the guest once their browser has finished with the provider. The
+// server checks the authorisation itself; the body carries nothing we trust.
+export const confirmRequest = asyncHandler(async (req: Request, res: Response) => {
+  const result = await confirmRequestPayment(req.params.id);
+
+  switch (result.outcome) {
+    case 'not_found':
+      return res.status(404).json({ error: 'Request not found' });
+
+    case 'no_longer_available':
+      return res.status(410).json({ error: 'This request is no longer available' });
+
+    case 'not_authorized':
+      return res.status(402).json({ error: result.detail });
+
+    // Confirming twice is normal: the provider webhook races the browser.
+    case 'confirmed':
+    case 'already_confirmed':
+      return res.json({ requestId: req.params.id, status: 'PENDING' });
+  }
 });
 
 export const getRequestsByEvent = asyncHandler(async (req: Request, res: Response) => {
@@ -169,7 +270,8 @@ export const getRequestsByEvent = asyncHandler(async (req: Request, res: Respons
   }
 
   const requests = await prisma.request.findMany({
-    where: whereClause,
+    // A request nobody has paid for yet is not part of the night.
+    where: { ...whereClause, status: { not: 'AWAITING_PAYMENT' } },
     orderBy: { createdAt: 'desc' },
     take: 20
   });
@@ -196,7 +298,8 @@ export const getRequestsByEvent = asyncHandler(async (req: Request, res: Respons
 
 export const getDJRequests = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const requests = await prisma.request.findMany({
-    where: { djId: req.dj!.djId },
+    // Unpaid drafts never reach the DJ's screen.
+    where: { djId: req.dj!.djId, status: { not: 'AWAITING_PAYMENT' } },
     orderBy: { createdAt: 'desc' }
   });
 
@@ -338,6 +441,11 @@ export const rejectRequest = asyncHandler(async (req: AuthenticatedRequest, res:
       }
       break;
   }
+
+  await prisma.request.update({
+    where: { id },
+    data: { paymentStatus: 'CANCELED' }
+  });
 
   // Emit socket event for rejected request
   emitRequestRejected(request.dj.eventCode, request.id);

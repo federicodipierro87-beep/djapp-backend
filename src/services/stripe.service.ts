@@ -5,7 +5,14 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 export class StripeService {
-  async createPaymentIntent(amount: number, currency: string = 'eur') {
+  async createPaymentIntent(
+    amount: number,
+    currency: string = 'eur',
+    // The request this authorisation belongs to. Stripe echoes it back on every
+    // webhook, which is how an event that arrives without the guest's browser
+    // still finds its way to the right row.
+    metadata: Record<string, string> = {}
+  ) {
     try {
       const paymentIntent = await stripe.paymentIntents.create({
         amount: Math.round(amount * 100),
@@ -15,7 +22,8 @@ export class StripeService {
           enabled: true,
         },
         metadata: {
-          service: 'dj-request'
+          service: 'dj-request',
+          ...metadata
         }
       });
 

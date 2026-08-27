@@ -111,8 +111,11 @@ const createEventSummary = async (djId: string, eventCode: string) => {
     queueStats
   ] = await Promise.all([
     prisma.request.count({
-      where: { 
+      where: {
         djId,
+        // Drafts abandoned mid-payment were never requests as far as the night
+        // is concerned, and counting them makes the totals stop adding up.
+        status: { not: 'AWAITING_PAYMENT' },
         createdAt: { gte: eventStartTime }
       }
     }),
@@ -332,8 +335,9 @@ export const getEventStats = asyncHandler(async (req: AuthenticatedRequest, res:
       totalEarnings
     ] = await Promise.all([
       prisma.request.count({
-        where: { 
+        where: {
           djId: req.dj!.djId,
+          status: { not: 'AWAITING_PAYMENT' },
           createdAt: { gt: eventStartTime }
         }
       }),

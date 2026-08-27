@@ -15,6 +15,7 @@ import subscriptionRoutes from './routes/subscription.routes';
 import eventRoutes from './routes/event.routes';
 import spotifyRoutes from './routes/spotify.routes';
 import { handleWebhook } from './controllers/subscription.controller';
+import { stripeWebhook } from './controllers/payment.controller';
 
 import { errorMiddleware } from './middlewares/error.middleware';
 import { expirationService } from './services/expiration.service';
@@ -81,10 +82,14 @@ app.use(cors({
   optionsSuccessStatus: 200
 }));
 
-// Webhook route MUST be before express.json() to receive raw body, and before
+// Webhook routes MUST be before express.json() to receive raw body, and before
 // the rate limiter: Stripe retries a throttled webhook only for a limited
-// window, and a dropped subscription event leaves the DJ locked out.
+// window, and a dropped event leaves a DJ locked out or a paid request
+// invisible. Mounting them on a router below would not work - body-parser marks
+// the request as already read and the raw parser silently does nothing, which
+// is why signature verification never succeeded here.
 app.post('/api/subscriptions/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+app.post('/api/payments/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 
 app.use(limiter);
 

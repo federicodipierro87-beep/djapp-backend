@@ -271,6 +271,13 @@ export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: 
     captureError = error instanceof Error ? error.message : 'Payment capture failed';
   }
 
+  await prisma.request.update({
+    where: { id: request.id },
+    data: captureError
+      ? { paymentStatus: 'FAILED' }
+      : { paymentStatus: 'CAPTURED', capturedAt: new Date() }
+  });
+
   // Get DJ's eventCode for socket emission
   const dj = await prisma.dJ.findUnique({
     where: { id: req.dj!.djId },
@@ -360,6 +367,13 @@ export const skipSong = asyncHandler(async (req: AuthenticatedRequest, res: Resp
     // costs the guest nothing, but it must not be swallowed.
     console.error(`Payment cancellation failed for request ${request.id}:`, error);
     cancelError = error instanceof Error ? error.message : 'Payment cancellation failed';
+  }
+
+  if (!cancelError) {
+    await prisma.request.update({
+      where: { id: request.id },
+      data: { paymentStatus: 'CANCELED' }
+    });
   }
 
   // Get DJ's eventCode for socket emission

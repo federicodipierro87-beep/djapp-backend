@@ -4,6 +4,7 @@ import prisma from '../utils/database';
 import { stripeService } from './stripe.service';
 import { paypalService } from './paypal.service';
 import { satispayService } from './satispay.service';
+import { AWAITING_PAYMENT_TIMEOUT_MS } from '../config/payments';
 
 export const EXPIRATION_MINUTES = 180;
 export const EXPIRATION_MS = EXPIRATION_MINUTES * 60 * 1000;
@@ -26,6 +27,7 @@ export class ExpirationService {
     this.task = cron.schedule('* * * * *', async () => {
       try {
         await this.expireOldRequests();
+        await this.expireAbandonedDrafts();
       } catch (error) {
         console.error('Error in expiration service:', error);
       }
@@ -66,7 +68,7 @@ export class ExpirationService {
         // authorisation the queue still depends on.
         const claimed = await prisma.request.updateMany({
           where: { id: request.id, status: 'PENDING' },
-          data: { status: 'EXPIRED' }
+          data: { status: 'EXPIRED', paymentStatus: 'CANCELED' }
         });
 
         if (claimed.count !== 1) {
@@ -78,6 +80,45 @@ export class ExpirationService {
         console.log(`Expired request ${request.id} for song "${request.songTitle}"`);
       } catch (error) {
         console.error(`Failed to expire request ${request.id}:`, error);
+      }
+    }
+  }
+
+  // A guest who closes the tab mid-payment leaves a request nobody can confirm
+  // and, if their bank did put the money on hold, a card authorisation that
+  // would otherwise sit there for days.
+  private async expireAbandonedDrafts() {
+    const cutoff = new Date(Date.now() - AWAITING_PAYMENT_TIMEOUT_MS);
+
+    const candidates = await prisma.request.findMany({
+      where: {
+        status: 'AWAITING_PAYMENT',
+        createdAt: { lt: cutoff }
+      },
+      select: {
+        id: true,
+        songTitle: true,
+        paymentMethod: true,
+        paymentIntentId: true
+      }
+    });
+
+    for (const request of candidates) {
+      try {
+        // Same claim-first rule as above: the confirmation may have landed
+        // between the read and the write.
+        const claimed = await prisma.request.updateMany({
+          where: { id: request.id, status: 'AWAITING_PAYMENT' },
+          data: { status: 'EXPIRED', paymentStatus: 'CANCELED' }
+        });
+
+        if (claimed.count !== 1) {
+          continue;
+        }
+
+        await this.cancelPaymentByMethod(request);
+      } catch (error) {
+        console.error(`Failed to discard unpaid request ${request.id}:`, error);
       }
     }
   }

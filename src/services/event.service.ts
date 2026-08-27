@@ -333,7 +333,8 @@ export class EventService {
     }
 
     const requestCount = await prisma.request.count({
-      where: { eventId: id }
+      // An abandoned draft is not a reason to keep an event around.
+      where: { eventId: id, status: { not: 'AWAITING_PAYMENT' } }
     });
 
     if (requestCount > 0) {

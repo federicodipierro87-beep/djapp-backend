@@ -15,9 +15,10 @@ describe('createRequestSchema', () => {
     expect(createRequestSchema.parse(valid)).toMatchObject(valid);
   });
 
-  // This is the free-requests bug. The handler used to skip creating an
-  // authorisation whenever the body already carried one, so any string here
-  // bought a request that nobody had paid for.
+  // This is the free-requests bug: the handler used to store whatever id the
+  // body carried, so any string here bought a request nobody had paid for. The
+  // transition shim still reads the raw body, but only to check the id against
+  // Stripe - it must never arrive as validated data.
   it('drops a client supplied paymentIntentId', () => {
     const parsed = createRequestSchema.parse({ ...valid, paymentIntentId: 'pi_forged' });
 

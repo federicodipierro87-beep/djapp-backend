@@ -47,15 +47,21 @@ model Request {
   requesterEmail  String?
   donationAmount  Decimal
   paymentMethod   PaymentMethod
-  paymentIntentId String?
-  status          RequestStatus @default(PENDING)
+  paymentProvider PaymentProvider?
+  // Unique because an authorisation pays for exactly one request. Without this
+  // the same authorised payment could be spent on several songs.
+  paymentIntentId String?          @unique
+  paymentStatus   PaymentStatus    @default(PENDING)
+  authorizedAt    DateTime?
+  capturedAt      DateTime?
+  status          RequestStatus    @default(PENDING)
   djId            String
-  dj              DJ            @relation(fields: [djId], references: [id], onDelete: Cascade)
+  dj              DJ               @relation(fields: [djId], references: [id], onDelete: Cascade)
   eventId         String?
-  event           Event?        @relation(fields: [eventId], references: [id])
+  event           Event?           @relation(fields: [eventId], references: [id])
   queueItem       QueueItem?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@map("requests")
 }
@@ -90,6 +96,24 @@ enum RequestStatus {
   REJECTED
   EXPIRED
   CLOSED
+  // The request exists but nobody has paid for it yet, so it is invisible to
+  // the DJ. It becomes PENDING only once the provider confirms the
+  // authorisation. Listed last because Postgres enum values are appended.
+  AWAITING_PAYMENT
+}
+
+enum PaymentProvider {
+  STRIPE
+  PAYPAL
+  SATISPAY
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  CANCELED
+  FAILED
 }
 
 enum QueueStatus {
