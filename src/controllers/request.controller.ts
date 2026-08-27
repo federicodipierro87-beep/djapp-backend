@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { Prisma } from '@prisma/client';
+import { Prisma, RequestStatus } from '@prisma/client';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { stripeService } from '../services/stripe.service';
@@ -30,6 +30,19 @@ export const createRequestSchema = z.object({
   // amount is what gets authorised on the payment provider.
   donationAmount: z.number().min(0.01).max(1000),
   paymentMethod: z.enum(['CARD', 'APPLE_PAY', 'GOOGLE_PAY', 'PAYPAL', 'SATISPAY'])
+});
+
+// The panel polls this endpoint every few seconds and used to be handed the
+// DJ's entire history each time, which only ever gets slower. Callers ask for
+// the statuses they render and page backwards from there.
+const djRequestsQuerySchema = z.object({
+  status: z
+    .string()
+    .optional()
+    .transform((value) => value?.split(',').map((s) => s.trim().toUpperCase()))
+    .pipe(z.array(z.nativeEnum(RequestStatus)).nonempty().optional()),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+  cursor: z.string().uuid().optional()
 });
 
 // An event code can belong to the Event table or, for older accounts, straight
@@ -298,10 +311,19 @@ export const getRequestsByEvent = asyncHandler(async (req: Request, res: Respons
 });
 
 export const getDJRequests = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { status, limit, cursor } = djRequestsQuerySchema.parse(req.query);
+
+  // Unpaid drafts never reach the DJ's screen, whatever was asked for.
+  const statusFilter: Prisma.RequestWhereInput = status
+    ? { status: { in: status.filter((s) => s !== RequestStatus.AWAITING_PAYMENT) } }
+    : { status: { not: RequestStatus.AWAITING_PAYMENT } };
+
   const requests = await prisma.request.findMany({
-    // Unpaid drafts never reach the DJ's screen.
-    where: { djId: req.dj!.djId, status: { not: 'AWAITING_PAYMENT' } },
-    orderBy: { createdAt: 'desc' }
+    where: { djId: req.dj!.djId, ...statusFilter },
+    // createdAt alone can tie, and a cursor that lands on a tie skips rows.
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {})
   });
 
   const requestsWithTimeRemaining = await Promise.all(

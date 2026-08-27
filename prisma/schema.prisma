@@ -63,6 +63,11 @@ model Request {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
+  // The DJ panel reads its own requests newest first, filtered by status, every
+  // few seconds. Postgres does not index foreign keys on its own, so the event
+  // lookups were sequential scans over the whole table.
+  @@index([djId, status, createdAt])
+  @@index([eventId, status])
   @@map("requests")
 }
 
@@ -79,6 +84,10 @@ model QueueItem {
   addedAt   DateTime    @default(now())
   playedAt  DateTime?
 
+  // The public queue screen polls by event and the DJ panel by dj, both split by
+  // status.
+  @@index([djId, status])
+  @@index([eventId, status])
   @@map("queue_items")
 }
 
@@ -146,6 +155,8 @@ model EventSummary {
   endedAt          DateTime @default(now())
   createdAt        DateTime @default(now())
 
+  // Closing a night looks up the previous one to find where this one started.
+  @@index([djId, endedAt])
   @@map("event_summaries")
 }
 
@@ -201,6 +212,8 @@ model Event {
 
   @@index([latitude, longitude])
   @@index([status, dateTime])
+  // "My events", and the lookup of the night a DJ is currently running.
+  @@index([djId, dateTime])
   @@map("events")
 }
 

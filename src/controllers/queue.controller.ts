@@ -14,6 +14,19 @@ const reorderSchema = z.object({
   queueItemIds: z.array(z.string().uuid()).max(500)
 });
 
+const LIVE_STATUSES = [QueueStatus.WAITING, QueueStatus.NOW_PLAYING];
+const DONE_STATUSES = [QueueStatus.PLAYED, QueueStatus.SKIPPED];
+
+// Both screens only ever show a short tail of what has already been played - five
+// songs in public, ten in the panel - but the endpoints used to return every
+// song of the night, and for a DJ on the Event system every song of every night
+// they had ever played. Twenty leaves room for the display without the payload
+// growing all evening.
+// The completed tail is returned oldest-first so that the clients' `slice(-n)`
+// still picks the newest ones. It is ordered by when the song entered the queue
+// because a skipped song never gets a playedAt, so that column cannot order it.
+const RECENT_DONE_LIMIT = 20;
+
 export const getPublicQueue = asyncHandler(async (req: Request, res: Response) => {
   const { eventCode } = req.params;
 
@@ -45,20 +58,32 @@ export const getPublicQueue = asyncHandler(async (req: Request, res: Response) =
     ? { eventId: event.id }
     : { djId };
 
-  const queueItems = await prisma.queueItem.findMany({
-    where: whereClause,
-    include: {
-      request: {
-        select: {
-          songTitle: true,
-          artistName: true,
-          albumCover: true,
-          requesterName: true
-        }
+  const songSelection = {
+    request: {
+      select: {
+        songTitle: true,
+        artistName: true,
+        albumCover: true,
+        requesterName: true
       }
-    },
-    orderBy: { position: 'asc' }
-  });
+    }
+  };
+
+  const [live, done] = await Promise.all([
+    prisma.queueItem.findMany({
+      where: { ...whereClause, status: { in: LIVE_STATUSES } },
+      include: songSelection,
+      orderBy: { position: 'asc' }
+    }),
+    prisma.queueItem.findMany({
+      where: { ...whereClause, status: { in: DONE_STATUSES } },
+      include: songSelection,
+      orderBy: { addedAt: 'desc' },
+      take: RECENT_DONE_LIMIT
+    })
+  ]);
+
+  const queueItems = [...live, ...done.reverse()];
 
   const publicQueue = queueItems.map((item) => ({
     id: item.id,
@@ -77,24 +102,56 @@ export const getPublicQueue = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const getDJQueue = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const queueItems = await prisma.queueItem.findMany({
-    where: { djId: req.dj!.djId },
-    include: {
-      request: {
-        select: {
-          songTitle: true,
-          artistName: true,
-          spotifyTrackId: true,
-          albumCover: true,
-          requesterName: true,
-          requesterEmail: true,
-          donationAmount: true,
-          paymentMethod: true
-        }
-      }
-    },
-    orderBy: { position: 'asc' }
+  const djId = req.dj!.djId;
+
+  // Scoping by djId alone was only ever right because the legacy "end event"
+  // button deletes the queue. Ending an Event does not, so a DJ on the new
+  // system was shown - and credited with - every song of every night they had
+  // ever played. While an event is running, that event is the night.
+  const activeEvent = await prisma.event.findFirst({
+    where: { djId, status: 'ACTIVE' },
+    orderBy: { dateTime: 'desc' },
+    select: { id: true }
   });
+
+  const scope: Prisma.QueueItemWhereInput = activeEvent ? { eventId: activeEvent.id } : { djId };
+
+  const songSelection = {
+    request: {
+      select: {
+        songTitle: true,
+        artistName: true,
+        spotifyTrackId: true,
+        albumCover: true,
+        requesterName: true,
+        requesterEmail: true,
+        donationAmount: true,
+        paymentMethod: true
+      }
+    }
+  };
+
+  const [live, done, played] = await Promise.all([
+    prisma.queueItem.findMany({
+      where: { ...scope, status: { in: LIVE_STATUSES } },
+      include: songSelection,
+      orderBy: { position: 'asc' }
+    }),
+    prisma.queueItem.findMany({
+      where: { ...scope, status: { in: DONE_STATUSES } },
+      include: songSelection,
+      orderBy: { addedAt: 'desc' },
+      take: RECENT_DONE_LIMIT
+    }),
+    // Summed by the database over every played song, not over the page above:
+    // the total has to stay right even though the list is now truncated.
+    prisma.request.aggregate({
+      where: { queueItem: { is: { ...scope, status: QueueStatus.PLAYED } } },
+      _sum: { donationAmount: true }
+    })
+  ]);
+
+  const queueItems = [...live, ...done.reverse()];
 
   const djQueue = queueItems.map(item => ({
     id: item.id,
@@ -113,13 +170,8 @@ export const getDJQueue = asyncHandler(async (req: AuthenticatedRequest, res: Re
     isNowPlaying: item.status === 'NOW_PLAYING'
   }));
 
-  // Calcola guadagni solo dalle canzoni PLAYED, non quelle SKIPPED
-  const totalEarnings = queueItems.reduce((total, item) => {
-    if (item.status === 'PLAYED') {
-      return total + item.request.donationAmount.toNumber();
-    }
-    return total;
-  }, 0);
+  // Solo le canzoni PLAYED, non quelle SKIPPED: uno skip non viene addebitato.
+  const totalEarnings = played._sum.donationAmount?.toNumber() ?? 0;
 
   res.json({
     queue: djQueue,

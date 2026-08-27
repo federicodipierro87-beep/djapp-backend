@@ -35,6 +35,30 @@ function generateEventCode(): string {
   return code;
 }
 
+const KM_PER_DEGREE_LATITUDE = 111.32;
+
+// A square that certainly contains the circle. It is what the database can
+// filter on with an index; the exact distance is applied to what comes back.
+export function boundingBox(lat: number, lng: number, radiusKm: number) {
+  const latDelta = radiusKm / KM_PER_DEGREE_LATITUDE;
+
+  // Meridians converge towards the poles. Close enough to one, the box would
+  // have to span every longitude anyway, so stop dividing by almost zero.
+  const shrink = Math.cos(toRad(lat));
+  const lngDelta = shrink > 0.01 ? radiusKm / (KM_PER_DEGREE_LATITUDE * shrink) : 180;
+
+  return {
+    latMin: lat - latDelta,
+    latMax: lat + latDelta,
+    lngMin: lng - lngDelta,
+    lngMax: lng + lngDelta,
+    // Around the antimeridian the box is two ranges, not one. Rare enough that
+    // dropping the longitude bound and letting the distance check do the work
+    // beats getting the split wrong.
+    lngWraps: lngDelta >= 180 || lng - lngDelta < -180 || lng + lngDelta > 180
+  };
+}
+
 function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = toRad(lat2 - lat1);
@@ -183,12 +207,18 @@ export class EventService {
     radiusKm: number = 10,
     status: EventStatus = 'ACTIVE'
   ) {
+    const box = boundingBox(lat, lng, radiusKm);
+
     const events = await prisma.event.findMany({
       where: {
         status,
         dateTime: {
           gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
-        }
+        },
+        // Every event in the country used to be loaded and measured in Node to
+        // return the handful within a few kilometres.
+        latitude: { gte: box.latMin, lte: box.latMax },
+        ...(box.lngWraps ? {} : { longitude: { gte: box.lngMin, lte: box.lngMax } })
       },
       include: {
         dj: {
