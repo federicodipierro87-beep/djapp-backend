@@ -13,7 +13,12 @@ import {
   readAuthorization,
   toCents
 } from '../services/requestPayment.service';
-import { CURRENCY, isPaymentMethodEnabled, providerFor } from '../config/payments';
+import {
+  CURRENCY,
+  isPaymentMethodEnabled,
+  providerFor,
+  stripeConnectEnabled
+} from '../config/payments';
 import { emitNewRequest, emitRequestAccepted, emitRequestRejected, emitQueueUpdated } from '../socket/socket';
 import { broadcastCode } from '../socket/broadcastCode';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -60,7 +65,8 @@ async function resolveEventCode(eventCode: string) {
       // otherwise file the request against another DJ's night.
       eventId: event.id as string | null,
       minDonation: event.dj.minDonation.toNumber(),
-      isActive: event.status === 'ACTIVE'
+      isActive: event.status === 'ACTIVE',
+      ...stripeDestination(event.dj)
     };
   }
 
@@ -71,7 +77,18 @@ async function resolveEventCode(eventCode: string) {
     djId: dj.id,
     eventId: null,
     minDonation: dj.minDonation.toNumber(),
-    isActive: true
+    isActive: true,
+    ...stripeDestination(dj)
+  };
+}
+
+// Having an account is not the same as being allowed to charge with it: Stripe
+// only sets chargesEnabled once it has verified the DJ's identity, and a
+// transfer to an unverified account is refused.
+function stripeDestination(dj: { stripeAccountId: string | null; chargesEnabled: boolean }) {
+  return {
+    stripeAccountId: dj.stripeAccountId,
+    canReceiveStripe: Boolean(dj.stripeAccountId && dj.chargesEnabled)
   };
 }
 
@@ -108,6 +125,15 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
 
   const provider = providerFor(data.paymentMethod);
 
+  // With Connect on, this donation is settled into the DJ's own account, so
+  // there has to be one and Stripe has to have cleared it. Saying so plainly
+  // beats authorising a card for money that could never be transferred.
+  if (provider === 'STRIPE' && stripeConnectEnabled && !target.canReceiveStripe) {
+    return res.status(409).json({
+      error: 'Questo DJ non ha ancora completato la configurazione dei pagamenti'
+    });
+  }
+
   const common = {
     songTitle: data.songTitle,
     artistName: data.artistName,
@@ -122,7 +148,10 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
     eventId: target.eventId
   };
 
-  if (legacyPaymentIntentId) {
+  // The same reasoning as createStripeIntent: an authorisation the client made
+  // for itself has no connected account behind it, so adopting one would put
+  // the guest's money on the platform account instead of the DJ's.
+  if (legacyPaymentIntentId && !stripeConnectEnabled) {
     return createRequestFromExistingAuthorization(res, common, legacyPaymentIntentId);
   }
 
@@ -134,7 +163,12 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
 
   let payment;
   try {
-    payment = await createAuthorization(provider, request.id, data.donationAmount);
+    payment = await createAuthorization(
+      provider,
+      request.id,
+      data.donationAmount,
+      stripeConnectEnabled ? target.stripeAccountId : null
+    );
   } catch (error) {
     // A request with no way to pay for it is litter: nobody can confirm it and
     // the DJ will never see it.

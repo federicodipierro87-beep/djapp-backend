@@ -32,13 +32,20 @@ export function toCents(amount: number): number {
 export async function createAuthorization(
   provider: PaymentProvider,
   requestId: string,
-  amount: number
+  amount: number,
+  // The DJ's connected Stripe account. Null means the platform keeps the money,
+  // which is the pre-Connect behaviour and what still happens while the feature
+  // is switched off.
+  stripeAccountId: string | null = null
 ): Promise<PaymentInstructions> {
   switch (provider) {
     case PaymentProvider.STRIPE: {
-      const paymentIntent = await stripeService.createPaymentIntent(amount, CURRENCY, {
-        requestId
-      });
+      const paymentIntent = await stripeService.createPaymentIntent(
+        amount,
+        CURRENCY,
+        { requestId },
+        stripeAccountId
+      );
 
       return {
         provider,

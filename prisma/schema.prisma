@@ -18,7 +18,15 @@ model DJ {
   firstName        String?
   lastName         String?
   address          String?
-  stripeAccountId  String?
+  // The DJ's own Stripe Connect account, where the guests' donations land. Set
+  // by the server when onboarding starts and never by the DJ: it is the
+  // destination of real money, so it cannot be a free-text field.
+  stripeAccountId  String?        @unique
+  // Stripe's verdict on that account, mirrored here from account.updated so
+  // that taking a donation does not need a round trip to Stripe. A DJ can have
+  // an account and still not be allowed to charge with it.
+  chargesEnabled   Boolean        @default(false)
+  payoutsEnabled   Boolean        @default(false)
   stripeCustomerId String?        @unique
   paypalEmail      String?
   satispayId       String?

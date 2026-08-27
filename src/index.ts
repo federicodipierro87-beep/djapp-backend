@@ -15,7 +15,7 @@ import subscriptionRoutes from './routes/subscription.routes';
 import eventRoutes from './routes/event.routes';
 import spotifyRoutes from './routes/spotify.routes';
 import { handleWebhook } from './controllers/subscription.controller';
-import { stripeWebhook } from './controllers/payment.controller';
+import { stripeWebhook, stripeConnectWebhook } from './controllers/payment.controller';
 
 import { errorMiddleware } from './middlewares/error.middleware';
 import { expirationService } from './services/expiration.service';
@@ -90,6 +90,7 @@ app.use(cors({
 // is why signature verification never succeeded here.
 app.post('/api/subscriptions/webhook', express.raw({ type: 'application/json' }), handleWebhook);
 app.post('/api/payments/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
+app.post('/api/payments/webhook/stripe/connect', express.raw({ type: 'application/json' }), stripeConnectWebhook);
 
 app.use(limiter);
 

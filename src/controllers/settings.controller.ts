@@ -12,7 +12,10 @@ const updateSettingsSchema = z.object({
   lastName: z.string().trim().min(1).max(60).optional(),
   address: z.string().trim().min(1).max(250).optional(),
   minDonation: z.number().min(0.01).max(1000).optional(),
-  stripeAccountId: z.string().trim().max(255).optional(),
+  // stripeAccountId is deliberately absent. It used to be a free-text field in
+  // this form, which meant a DJ could name any Stripe account as the
+  // destination of their guests' money - including someone else's. It is now
+  // written only by the Connect onboarding flow.
   paypalEmail: z.string().trim().email().max(254).optional(),
   satispayId: z.string().trim().max(255).optional()
 });

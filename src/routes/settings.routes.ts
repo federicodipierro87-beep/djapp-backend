@@ -1,5 +1,6 @@
 import express from 'express';
 import { getSettings, updateSettings, generateNewEventCode, endCurrentEvent, getEventStats, getEventSummaries, deleteEventSummary, changePassword, generateQRCode } from '../controllers/settings.controller';
+import { getConnectStatus, startConnectOnboarding } from '../controllers/connect.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { subscriptionMiddleware } from '../middlewares/subscription.middleware';
 
@@ -14,5 +15,10 @@ router.get('/event/summaries', authMiddleware, subscriptionMiddleware, getEventS
 router.delete('/event/summaries/:id', authMiddleware, subscriptionMiddleware, deleteEventSummary);
 router.get('/stats', authMiddleware, subscriptionMiddleware, getEventStats);
 router.get('/qr-code', authMiddleware, subscriptionMiddleware, generateQRCode);
+
+// Available whether or not STRIPE_CONNECT_ENABLED is on: DJs have to be able to
+// finish onboarding before it is switched on, not after.
+router.get('/connect/status', authMiddleware, subscriptionMiddleware, getConnectStatus);
+router.post('/connect/onboard', authMiddleware, subscriptionMiddleware, startConnectOnboarding);
 
 export default router;

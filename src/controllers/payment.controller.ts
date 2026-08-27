@@ -3,6 +3,7 @@ import { z } from 'zod';
 import Stripe from 'stripe';
 import { stripeService } from '../services/stripe.service';
 import { confirmRequestPayment } from '../services/requestPayment.service';
+import { stripeConnectEnabled } from '../config/payments';
 import prisma from '../utils/database';
 import { asyncHandler } from '../utils/asyncHandler';
 
@@ -23,6 +24,14 @@ const createStripeIntentSchema = z.object({
 // reason this survives is the browser tabs that were already open at deploy
 // time. Delete it once they have gone.
 export const createStripeIntent = asyncHandler(async (req: Request, res: Response) => {
+  // An authorisation created here belongs to no DJ, so it cannot name one as
+  // its destination: the money would settle on the platform account. Once
+  // Connect is on that is the wrong answer, and the old tabs this exists for
+  // are long gone by then.
+  if (stripeConnectEnabled) {
+    return res.status(410).json({ error: 'Ricarica la pagina per continuare' });
+  }
+
   const { amount, currency } = createStripeIntentSchema.parse(req.body);
 
   const paymentIntent = await stripeService.createPaymentIntent(amount, currency);
@@ -81,6 +90,45 @@ export const stripeWebhook = asyncHandler(async (req: Request, res: Response) =>
     }
   } catch (error) {
     console.error(`Failed to handle Stripe event ${event.id} (${event.type}):`, error);
+  }
+});
+
+// Connect events arrive on their own endpoint, with their own signing secret.
+// Without this the DJ's onboarding state would only ever be refreshed when they
+// happened to open the settings page.
+export const stripeConnectWebhook = asyncHandler(async (req: Request, res: Response) => {
+  let event: Stripe.Event;
+
+  try {
+    const signature = req.headers['stripe-signature'] as string;
+    event = await stripeService.constructEvent(
+      req.body,
+      signature,
+      process.env.STRIPE_CONNECT_WEBHOOK_SECRET
+    );
+  } catch (error) {
+    console.error('Stripe Connect webhook verification failed:', error);
+    return res.status(400).json({ error: 'Invalid webhook' });
+  }
+
+  res.json({ received: true });
+
+  try {
+    if (event.type === 'account.updated') {
+      const account = event.data.object;
+
+      // Matched on the account id rather than the djId in the metadata: the
+      // column is unique and it is the one the charges are actually sent to.
+      await prisma.dJ.updateMany({
+        where: { stripeAccountId: account.id },
+        data: {
+          chargesEnabled: account.charges_enabled,
+          payoutsEnabled: account.payouts_enabled
+        }
+      });
+    }
+  } catch (error) {
+    console.error(`Failed to handle Stripe Connect event ${event.id} (${event.type}):`, error);
   }
 });
 

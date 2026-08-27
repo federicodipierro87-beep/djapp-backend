@@ -45,3 +45,28 @@ export const enabledPaymentMethods: PaymentMethod[] =
 export function isPaymentMethodEnabled(method: PaymentMethod): boolean {
   return enabledPaymentMethods.includes(method);
 }
+
+// With Connect on, a donation is charged on the platform account but settled
+// into the DJ's own, and a DJ who has not been through onboarding cannot be
+// paid at all.
+//
+// Off by default on purpose. No existing DJ has a connected account, so turning
+// this on is what makes onboarding mandatory: enable it once the DJs have
+// actually completed it, or the next guest to scan a QR code is told the DJ
+// cannot take payments.
+export const stripeConnectEnabled = process.env.STRIPE_CONNECT_ENABLED === 'true';
+
+// Express accounts are tied to a country at creation and it cannot be changed
+// afterwards. The DJs are Italian; anywhere else needs its own value.
+export const stripeConnectCountry = process.env.STRIPE_CONNECT_COUNTRY || 'IT';
+
+// The platform's cut of each donation, as a percentage. Zero by default: the
+// DJs already pay a subscription, so charging them twice has to be a deliberate
+// decision rather than something that happens because a variable was unset.
+const configuredFee = Number(process.env.PLATFORM_FEE_PERCENT ?? 0);
+export const platformFeePercent =
+  Number.isFinite(configuredFee) && configuredFee >= 0 && configuredFee <= 100 ? configuredFee : 0;
+
+export function platformFeeInCents(amountInCents: number): number {
+  return Math.round((amountInCents * platformFeePercent) / 100);
+}
