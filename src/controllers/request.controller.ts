@@ -5,7 +5,7 @@ import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { stripeService } from '../services/stripe.service';
 import { paypalService } from '../services/paypal.service';
-import { satispayService } from '../services/satispay.service';
+import { satispayCredentialsFor, satispayService } from '../services/satispay.service';
 import { expirationService } from '../services/expiration.service';
 import {
   confirmRequestPayment,
@@ -91,12 +91,25 @@ function payoutDestination(dj: {
   chargesEnabled: boolean;
   paypalMerchantId: string | null;
   paypalEmail: string | null;
+  satispayKeyId: string | null;
+  satispayPrivateKey: string | null;
 }) {
+  // Decrypting can fail if the encryption key has been rotated or is missing.
+  // That is a misconfiguration on our side, and it must read as "this DJ cannot
+  // take Satispay" rather than taking down every request for them.
+  let satispay = null;
+  try {
+    satispay = satispayCredentialsFor(dj);
+  } catch (error) {
+    console.error(`Could not read the Satispay credentials of DJ: ${String(error)}`);
+  }
+
   return {
     destination: {
       stripeAccountId: dj.stripeAccountId,
       paypalMerchantId: dj.paypalMerchantId,
-      paypalEmail: dj.paypalEmail
+      paypalEmail: dj.paypalEmail,
+      satispay
     },
     canReceiveStripe: Boolean(dj.stripeAccountId && dj.chargesEnabled)
   };
@@ -141,6 +154,16 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
   if (provider === 'STRIPE' && stripeConnectEnabled && !target.canReceiveStripe) {
     return res.status(409).json({
       error: 'Questo DJ non ha ancora completato la configurazione dei pagamenti'
+    });
+  }
+
+  // Satispay has no platform account to fall back to: a payment is created
+  // inside the DJ's own business account or not at all. The public event info
+  // leaves the method out for DJs who have not connected one, so reaching here
+  // means the guest is working from a stale page.
+  if (provider === 'SATISPAY' && !target.destination.satispay) {
+    return res.status(409).json({
+      error: 'Questo DJ non accetta pagamenti con Satispay'
     });
   }
 
@@ -503,11 +526,13 @@ export const rejectRequest = asyncHandler(async (req: AuthenticatedRequest, res:
       }
       break;
 
-    case 'SATISPAY':
-      if (request.paymentIntentId) {
-        await satispayService.cancelPayment(request.paymentIntentId);
+    case 'SATISPAY': {
+      const credentials = satispayCredentialsFor(request.dj);
+      if (request.paymentIntentId && credentials) {
+        await satispayService.cancelPayment(credentials, request.paymentIntentId);
       }
       break;
+    }
   }
 
   await prisma.request.update({

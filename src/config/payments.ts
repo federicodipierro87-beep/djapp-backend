@@ -23,10 +23,13 @@ export function providerFor(method: PaymentMethod): PaymentProvider {
   return PROVIDER_BY_METHOD[method];
 }
 
-// Only Stripe is switched on in production. PayPal is implemented but has never
-// been run against a real account, and the Satispay request signature is not the
-// one that API expects, so it would fail on every call. PAYMENT_METHODS is what
-// turns one on - in staging first, and without a deploy.
+// Only Stripe is switched on in production. PayPal and Satispay are both
+// implemented but neither has been run against a real account, so they stay off
+// until someone has watched a euro move end to end in staging. PAYMENT_METHODS
+// is what turns one on, without a deploy.
+//
+// Satispay additionally depends on the DJ: see availableMethods in the event
+// controller. Being enabled here only makes it possible, not offered.
 const DEFAULT_ENABLED_METHODS: PaymentMethod[] = [
   PaymentMethod.CARD,
   PaymentMethod.APPLE_PAY,

@@ -157,7 +157,6 @@ export const me = asyncHandler(async (req: AuthenticatedRequest, res: Response) 
       minDonation: dj.minDonation,
       stripeAccountId: dj.stripeAccountId,
       paypalEmail: dj.paypalEmail,
-      satispayId: dj.satispayId,
       createdAt: dj.createdAt,
       updatedAt: dj.updatedAt
     });

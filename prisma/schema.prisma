@@ -33,7 +33,12 @@ model DJ {
   // name as the payee. It comes out of partner onboarding; until a DJ has been
   // through that, their PayPal address is all we have to go on.
   paypalMerchantId String?
-  satispayId       String?
+  // Satispay has no marketplace model, so a donation can only reach the DJ by
+  // being made against their own business account. These are that account's API
+  // credentials: the key id is public, the private key signs requests for their
+  // money and is stored encrypted. Both are written only by the connect flow.
+  satispayKeyId      String?
+  satispayPrivateKey String?
   eventCode        String         @unique
   minDonation      Decimal        @default(5.00)
   status           DJStatus       @default(PENDING)

@@ -199,6 +199,49 @@ export const paypalWebhook = asyncHandler(async (req: Request, res: Response) =>
   }
 });
 
+const satispayCallbackSchema = z.object({
+  paymentId: z.string().trim().min(1).max(100)
+});
+
+// Satispay's callback is an unauthenticated HTTP GET carrying nothing but the
+// payment id - no signature, no status. So it is treated as a doorbell and
+// nothing more: it says a payment changed, and the server goes and asks
+// Satispay what it changed to.
+//
+// That is also why it needs no verification. Anyone can ring it, and the worst
+// they achieve is making us re-read a payment we own, which either is
+// authorised or is not.
+export const satispayCallback = asyncHandler(async (req: Request, res: Response) => {
+  const parsed = satispayCallbackSchema.safeParse(req.query);
+
+  // Satispay stops retrying on a 2xx and this is not something a retry would
+  // fix, so it is acknowledged either way.
+  res.json({ received: true });
+
+  if (!parsed.success) {
+    console.warn('Satispay callback arrived without a payment id');
+    return;
+  }
+
+  try {
+    const request = await prisma.request.findUnique({
+      where: { paymentIntentId: parsed.data.paymentId },
+      select: { id: true }
+    });
+
+    if (!request) {
+      console.warn(`Satispay callback names no request we know of`);
+      return;
+    }
+
+    // Reads the payment with the DJ's credentials and checks the amount and
+    // currency before anything is promoted.
+    await confirmRequestPayment(request.id);
+  } catch (error) {
+    console.error('Failed to handle Satispay callback:', error);
+  }
+});
+
 async function findRequestIdForPayPalEvent(event: PayPalWebhookEvent): Promise<string | null> {
   // The order id is what the request row stores. An order event names it
   // directly; a payment event is about an authorisation and carries it off to

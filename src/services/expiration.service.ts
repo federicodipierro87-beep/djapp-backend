@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../utils/database';
 import { stripeService } from './stripe.service';
 import { paypalService } from './paypal.service';
-import { satispayService } from './satispay.service';
+import { satispayCredentialsFor, satispayService } from './satispay.service';
 import { AWAITING_PAYMENT_TIMEOUT_MS } from '../config/payments';
 
 export const EXPIRATION_MINUTES = 180;
@@ -11,14 +11,17 @@ export const EXPIRATION_MS = EXPIRATION_MINUTES * 60 * 1000;
 
 // Only the columns this service actually reads. Widening it later is a compile
 // error rather than a silent `any` access.
-type ExpirableRequest = Prisma.RequestGetPayload<{
-  select: {
-    id: true;
-    songTitle: true;
-    paymentMethod: true;
-    paymentIntentId: true;
-  };
-}>;
+const EXPIRABLE_FIELDS = {
+  id: true,
+  songTitle: true,
+  paymentMethod: true,
+  paymentIntentId: true,
+  // Releasing a Satispay fund lock is a call into the DJ's own business
+  // account, so it cannot be done without their credentials.
+  dj: { select: { satispayKeyId: true, satispayPrivateKey: true } }
+} as const;
+
+type ExpirableRequest = Prisma.RequestGetPayload<{ select: typeof EXPIRABLE_FIELDS }>;
 
 export class ExpirationService {
   private task: cron.ScheduledTask | null = null;
@@ -49,12 +52,7 @@ export class ExpirationService {
         status: 'PENDING',
         createdAt: { lt: expirationTime }
       },
-      select: {
-        id: true,
-        songTitle: true,
-        paymentMethod: true,
-        paymentIntentId: true
-      }
+      select: EXPIRABLE_FIELDS
     });
 
     if (candidates.length === 0) return;
@@ -95,12 +93,7 @@ export class ExpirationService {
         status: 'AWAITING_PAYMENT',
         createdAt: { lt: cutoff }
       },
-      select: {
-        id: true,
-        songTitle: true,
-        paymentMethod: true,
-        paymentIntentId: true
-      }
+      select: EXPIRABLE_FIELDS
     });
 
     for (const request of candidates) {
@@ -141,10 +134,21 @@ export class ExpirationService {
         console.log(`Voided PayPal authorization for order ${request.paymentIntentId}`);
         break;
 
-      case 'SATISPAY':
-        await satispayService.cancelPayment(request.paymentIntentId);
+      case 'SATISPAY': {
+        const credentials = satispayCredentialsFor(request.dj);
+        if (!credentials) {
+          // The DJ disconnected Satispay while this payment was outstanding.
+          // The fund lock releases itself when it expires; there is nothing
+          // that can be done from here.
+          console.warn(
+            `Cannot release Satispay payment ${request.paymentIntentId}: the DJ has no credentials`
+          );
+          break;
+        }
+        await satispayService.cancelPayment(credentials, request.paymentIntentId);
         console.log(`Cancelled Satispay payment ${request.paymentIntentId}`);
         break;
+      }
 
       default:
         console.warn(`Unknown payment method: ${request.paymentMethod}`);

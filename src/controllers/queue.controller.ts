@@ -5,7 +5,8 @@ import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { stripeService } from '../services/stripe.service';
 import { paypalService } from '../services/paypal.service';
-import { satispayService } from '../services/satispay.service';
+import { satispayCredentialsFor, satispayService } from '../services/satispay.service';
+import { toCents } from '../services/requestPayment.service';
 import { emitQueueUpdated, emitNowPlayingChanged } from '../socket/socket';
 import { broadcastCode } from '../socket/broadcastCode';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -270,7 +271,9 @@ export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: 
     },
     include: {
       request: true,
-      dj: { select: { eventCode: true } },
+      // The Satispay credentials are the DJ's own; capturing or releasing a
+      // fund lock is impossible without them.
+      dj: { select: { eventCode: true, satispayKeyId: true, satispayPrivateKey: true } },
       event: { select: { eventCode: true } }
     }
   });
@@ -319,11 +322,19 @@ export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: 
         }
         break;
 
-      case 'SATISPAY':
-        if (request.paymentIntentId) {
-          captureResult = await satispayService.acceptPayment(request.paymentIntentId);
+      case 'SATISPAY': {
+        const credentials = satispayCredentialsFor(queueItem.dj);
+        if (request.paymentIntentId && credentials) {
+          // Satispay needs telling how much of the hold to take. It is the
+          // whole donation, but leaving it out is a 400 rather than a default.
+          captureResult = await satispayService.acceptPayment(
+            credentials,
+            request.paymentIntentId,
+            toCents(request.donationAmount.toNumber())
+          );
         }
         break;
+      }
     }
   } catch (error) {
     // The song really was played, so the queue state stays PLAYED. Surface the
@@ -364,7 +375,9 @@ export const skipSong = asyncHandler(async (req: AuthenticatedRequest, res: Resp
     },
     include: {
       request: true,
-      dj: { select: { eventCode: true } },
+      // The Satispay credentials are the DJ's own; capturing or releasing a
+      // fund lock is impossible without them.
+      dj: { select: { eventCode: true, satispayKeyId: true, satispayPrivateKey: true } },
       event: { select: { eventCode: true } }
     }
   });
@@ -411,11 +424,13 @@ export const skipSong = asyncHandler(async (req: AuthenticatedRequest, res: Resp
         }
         break;
 
-      case 'SATISPAY':
-        if (request.paymentIntentId) {
-          cancelResult = await satispayService.cancelPayment(request.paymentIntentId);
+      case 'SATISPAY': {
+        const credentials = satispayCredentialsFor(queueItem.dj);
+        if (request.paymentIntentId && credentials) {
+          cancelResult = await satispayService.cancelPayment(credentials, request.paymentIntentId);
         }
         break;
+      }
     }
   } catch (error) {
     // The authorisation expires on its own at the provider, so a failure here

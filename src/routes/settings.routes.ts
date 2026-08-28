@@ -1,6 +1,11 @@
 import express from 'express';
 import { getSettings, updateSettings, generateNewEventCode, endCurrentEvent, getEventStats, getEventSummaries, deleteEventSummary, changePassword, generateQRCode } from '../controllers/settings.controller';
 import { getConnectStatus, startConnectOnboarding } from '../controllers/connect.controller';
+import {
+  connectSatispay,
+  disconnectSatispay,
+  getSatispayStatus
+} from '../controllers/satispay.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { subscriptionMiddleware } from '../middlewares/subscription.middleware';
 
@@ -20,5 +25,11 @@ router.get('/qr-code', authMiddleware, subscriptionMiddleware, generateQRCode);
 // finish onboarding before it is switched on, not after.
 router.get('/connect/status', authMiddleware, subscriptionMiddleware, getConnectStatus);
 router.post('/connect/onboard', authMiddleware, subscriptionMiddleware, startConnectOnboarding);
+
+// Satispay is per-DJ rather than per-platform: these connect the DJ's own
+// business account, and without one their guests are not offered the method.
+router.get('/satispay/status', authMiddleware, subscriptionMiddleware, getSatispayStatus);
+router.post('/satispay/connect', authMiddleware, subscriptionMiddleware, connectSatispay);
+router.delete('/satispay/connect', authMiddleware, subscriptionMiddleware, disconnectSatispay);
 
 export default router;

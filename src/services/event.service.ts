@@ -176,7 +176,11 @@ export class EventService {
           select: {
             id: true,
             name: true,
-            minDonation: true
+            minDonation: true,
+            // Satispay is offered to a DJ's guests only if that DJ has
+            // connected their own business account.
+            satispayKeyId: true,
+            satispayPrivateKey: true
           }
         }
       }

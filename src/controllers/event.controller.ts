@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { PaymentMethod } from '@prisma/client';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { eventService } from '../services/event.service';
+import { canReceiveSatispay } from './satispay.controller';
+import { enabledPaymentMethods } from '../config/payments';
 import { asyncHandler } from '../utils/asyncHandler';
 import prisma from '../utils/database';
 
@@ -166,13 +169,20 @@ export const getPublicEventInfo = asyncHandler(async (req: Request, res: Respons
       eventName: event.name,
       djName: event.dj.name,
       minDonation: event.dj.minDonation.toNumber(),
+      paymentMethods: availableMethods(event.dj),
       isAcceptingRequests: event.status === 'ACTIVE'
     });
   }
 
   const dj = await prisma.dJ.findUnique({
     where: { eventCode },
-    select: { name: true, eventCode: true, minDonation: true }
+    select: {
+      name: true,
+      eventCode: true,
+      minDonation: true,
+      satispayKeyId: true,
+      satispayPrivateKey: true
+    }
   });
 
   if (!dj) {
@@ -184,9 +194,22 @@ export const getPublicEventInfo = asyncHandler(async (req: Request, res: Respons
     eventName: null,
     djName: dj.name,
     minDonation: dj.minDonation.toNumber(),
+    paymentMethods: availableMethods(dj),
     isAcceptingRequests: true
   });
 });
+
+// What this DJ's guests may actually pay with. The platform switch decides
+// which integrations are live at all; Satispay narrows that further, because it
+// runs on the DJ's own account and not every DJ has connected one.
+function availableMethods(dj: {
+  satispayKeyId: string | null;
+  satispayPrivateKey: string | null;
+}): PaymentMethod[] {
+  return enabledPaymentMethods.filter(
+    (method) => method !== PaymentMethod.SATISPAY || canReceiveSatispay(dj)
+  );
+}
 
 export const updateEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   try {

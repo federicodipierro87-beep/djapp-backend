@@ -4,17 +4,25 @@ import prisma from '../utils/database';
 import { CURRENCY } from '../config/payments';
 import { stripeService } from './stripe.service';
 import { paypalService } from './paypal.service';
-import { satispayService } from './satispay.service';
+import {
+  SatispayCredentials,
+  satispayCredentialsFor,
+  satispayService
+} from './satispay.service';
 import { emitNewRequest } from '../socket/socket';
 
 // Where a donation is meant to end up. Each provider reads only its own fields,
 // and all-null means the money stays on the platform account - the behaviour
 // from before any of this existed, and still what happens while the DJ has not
 // connected anything.
+//
+// Satispay is the exception: it has no platform account to fall back to, so
+// without the DJ's own credentials there is no payment to create at all.
 export interface PayoutDestination {
   stripeAccountId?: string | null;
   paypalMerchantId?: string | null;
   paypalEmail?: string | null;
+  satispay?: SatispayCredentials | null;
 }
 
 // What a guest is handed so their browser can complete the payment. Which field
@@ -81,7 +89,18 @@ export async function createAuthorization(
     }
 
     case PaymentProvider.SATISPAY: {
-      const payment = await satispayService.createPayment(amount);
+      if (!destination.satispay) {
+        throw new Error('This DJ has not connected a Satispay account');
+      }
+
+      // Created PENDING; it becomes AUTHORIZED when the guest approves it in
+      // the Satispay app, which is what the redirect sends them off to do.
+      const payment = await satispayService.createFundLock(
+        destination.satispay,
+        toCents(amount),
+        CURRENCY.toUpperCase(),
+        requestId
+      );
 
       return {
         provider,
@@ -97,7 +116,11 @@ export async function createAuthorization(
 // both the guest's browser and the webhook come through here.
 export async function ensureAuthorization(
   provider: PaymentProvider,
-  paymentIntentId: string
+  paymentIntentId: string,
+  // Only Satispay needs these: Stripe and PayPal are read with the platform's
+  // own credentials whoever the money is destined for, while a Satispay payment
+  // exists only inside the DJ's business account and is invisible without them.
+  satispay?: SatispayCredentials | null
 ): Promise<AuthorizationState> {
   switch (provider) {
     case PaymentProvider.STRIPE: {
@@ -127,7 +150,14 @@ export async function ensureAuthorization(
     }
 
     case PaymentProvider.SATISPAY: {
-      const payment = await satispayService.getPayment(paymentIntentId);
+      if (!satispay) {
+        throw new Error('This DJ has not connected a Satispay account');
+      }
+
+      // A fund lock is a genuine hold, so unlike PayPal there is nothing to
+      // trigger here - only to look at. AUTHORIZED means the guest approved it
+      // and the money is reserved.
+      const payment = await satispayService.getPayment(satispay, paymentIntentId);
 
       return {
         authorized: payment.status === 'AUTHORIZED',
@@ -149,7 +179,12 @@ export type ConfirmOutcome =
 // guest's confirm call and the provider webhook go through here, so whichever
 // arrives first wins and the second one is a no-op.
 export async function confirmRequestPayment(requestId: string): Promise<ConfirmOutcome> {
-  const request = await prisma.request.findUnique({ where: { id: requestId } });
+  const request = await prisma.request.findUnique({
+    where: { id: requestId },
+    // A Satispay payment cannot even be read without the DJ's own credentials,
+    // so they are fetched alongside rather than in a second round trip.
+    include: { dj: { select: { satispayKeyId: true, satispayPrivateKey: true } } }
+  });
 
   if (!request) {
     return { outcome: 'not_found' };
@@ -168,7 +203,8 @@ export async function confirmRequestPayment(requestId: string): Promise<ConfirmO
 
   const authorization = await ensureAuthorization(
     request.paymentProvider,
-    request.paymentIntentId
+    request.paymentIntentId,
+    satispayCredentialsFor(request.dj)
   );
 
   if (!authorization.authorized) {

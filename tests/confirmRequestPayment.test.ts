@@ -15,7 +15,12 @@ vi.mock('../src/services/stripe.service', () => ({
 }));
 
 vi.mock('../src/services/paypal.service', () => ({ paypalService: {} }));
-vi.mock('../src/services/satispay.service', () => ({ satispayService: {} }));
+vi.mock('../src/services/satispay.service', () => ({
+  satispayService: {},
+  // Reading the real one would need the encryption key. These drafts are all
+  // Stripe, so the answer never gets as far as being used.
+  satispayCredentialsFor: () => null
+}));
 
 vi.mock('../src/socket/socket', () => ({
   emitNewRequest: (...args: unknown[]) => emitNewRequest(...args)

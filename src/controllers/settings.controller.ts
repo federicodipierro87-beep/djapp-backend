@@ -16,8 +16,10 @@ const updateSettingsSchema = z.object({
   // this form, which meant a DJ could name any Stripe account as the
   // destination of their guests' money - including someone else's. It is now
   // written only by the Connect onboarding flow.
-  paypalEmail: z.string().trim().email().max(254).optional(),
-  satispayId: z.string().trim().max(255).optional()
+  // satispayId is gone with it, for the same reason: it was a free-text field
+  // that never took part in a payment. Satispay is now connected through its own
+  // endpoints, which store a key the DJ proved they own.
+  paypalEmail: z.string().trim().email().max(254).optional()
 });
 
 const generateEventCode = (): string => {
@@ -45,7 +47,6 @@ export const getSettings = asyncHandler(async (req: AuthenticatedRequest, res: R
       minDonation: dj.minDonation,
       stripeAccountId: dj.stripeAccountId,
       paypalEmail: dj.paypalEmail,
-      satispayId: dj.satispayId,
       createdAt: dj.createdAt,
       updatedAt: dj.updatedAt
     });
@@ -75,8 +76,7 @@ export const updateSettings = asyncHandler(async (req: AuthenticatedRequest, res
         eventCode: updatedDj.eventCode,
         minDonation: updatedDj.minDonation,
         stripeAccountId: updatedDj.stripeAccountId,
-        paypalEmail: updatedDj.paypalEmail,
-        satispayId: updatedDj.satispayId
+        paypalEmail: updatedDj.paypalEmail
       }
     });
   } catch (error) {
