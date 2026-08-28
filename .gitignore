@@ -37,7 +37,10 @@ coverage/
 .nyc_output
 
 # Prisma
-prisma/migrations/migration_lock.toml
+# migration_lock.toml is deliberately NOT ignored: Prisma writes "it should be
+# added in your version-control system" inside the file itself. It records which
+# database provider the migrations were written for, and without it a checkout
+# has no way to catch someone pointing the same migrations at a different engine.
 
 # OS generated files
 .DS_Store
