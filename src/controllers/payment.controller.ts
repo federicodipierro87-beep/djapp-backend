@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import Stripe from 'stripe';
 import { stripeService } from '../services/stripe.service';
+import { paypalService } from '../services/paypal.service';
 import { confirmRequestPayment } from '../services/requestPayment.service';
 import { stripeConnectEnabled } from '../config/payments';
 import prisma from '../utils/database';
@@ -141,30 +142,83 @@ async function findRequestIdForIntent(paymentIntentId: string): Promise<string |
   return request?.id ?? null;
 }
 
-export const paypalWebhook = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const event = req.body;
+// Only the parts of a PayPal notification this server acts on. The rest of the
+// payload is large, versioned by PayPal and none of our business.
+interface PayPalWebhookEvent {
+  event_type?: string;
+  resource?: {
+    id?: string;
+    custom_id?: string;
+    supplementary_data?: { related_ids?: { order_id?: string } };
+  };
+}
 
-    switch (event.event_type) {
-      case 'PAYMENT.AUTHORIZATION.CREATED':
-        console.log(`PayPal authorization created: ${event.resource.id}`);
-        break;
-        
-      case 'PAYMENT.AUTHORIZATION.VOIDED':
-        console.log(`PayPal authorization voided: ${event.resource.id}`);
-        break;
-        
-      case 'PAYMENT.CAPTURE.COMPLETED':
-        console.log(`PayPal capture completed: ${event.resource.id}`);
-        break;
-        
-      default:
-        console.log(`Unhandled PayPal event: ${event.event_type}`);
+// Approval and authorisation both mean the guest has done their part. The first
+// arrives before any money is held - confirming is what places the hold - and
+// the second after. Captures and voids are driven from here, so hearing about
+// them again tells us nothing.
+const CONFIRMING_EVENTS = new Set(['CHECKOUT.ORDER.APPROVED', 'PAYMENT.AUTHORIZATION.CREATED']);
+
+// The counterpart of the Stripe webhook: the path that still works when the
+// guest's browser never comes back from paypal.com.
+export const paypalWebhook = asyncHandler(async (req: Request, res: Response) => {
+  const event = req.body as PayPalWebhookEvent;
+
+  // Unverified, this endpoint would let anyone promote a request to PENDING by
+  // posting a made-up event. Only PayPal can check its own signature.
+  let verified = false;
+  try {
+    verified = await paypalService.verifyWebhookSignature(req.headers, event);
+  } catch (error) {
+    console.error('PayPal webhook verification failed:', error);
+  }
+
+  if (!verified) {
+    return res.status(400).json({ error: 'Invalid webhook' });
+  }
+
+  // Answer first, as with Stripe: PayPal retries a slow endpoint, and a retry
+  // storm is worse than a promotion that lands a moment late.
+  res.json({ received: true });
+
+  try {
+    if (!CONFIRMING_EVENTS.has(event.event_type ?? '')) return;
+
+    const requestId = await findRequestIdForPayPalEvent(event);
+
+    if (!requestId) {
+      console.warn(`PayPal event ${event.event_type} names no request we know of`);
+      return;
     }
 
-    res.status(200).send('OK');
+    // Re-reads the order from PayPal and checks the amount and currency itself,
+    // so nothing in the payload above is taken on trust.
+    await confirmRequestPayment(requestId);
   } catch (error) {
-    console.error('PayPal webhook error:', error);
-    res.status(400).json({ error: 'Invalid webhook' });
+    console.error(`Failed to handle PayPal event ${event.event_type}:`, error);
   }
 });
+
+async function findRequestIdForPayPalEvent(event: PayPalWebhookEvent): Promise<string | null> {
+  // The order id is what the request row stores. An order event names it
+  // directly; a payment event is about an authorisation and carries it off to
+  // one side.
+  const orderId =
+    event.event_type === 'CHECKOUT.ORDER.APPROVED'
+      ? event.resource?.id
+      : event.resource?.supplementary_data?.related_ids?.order_id;
+
+  if (orderId) {
+    const request = await prisma.request.findUnique({
+      where: { paymentIntentId: orderId },
+      select: { id: true }
+    });
+
+    if (request) return request.id;
+  }
+
+  // Set as the purchase unit's custom id when the order was created, and echoed
+  // back on everything that comes out of it. The fallback for an order whose id
+  // we somehow failed to store.
+  return event.resource?.custom_id ?? null;
+}

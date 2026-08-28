@@ -137,8 +137,8 @@ export class ExpirationService {
         break;
 
       case 'PAYPAL':
-        await paypalService.voidAuthorization(request.paymentIntentId);
-        console.log(`Voided PayPal authorization ${request.paymentIntentId}`);
+        await paypalService.voidOrder(request.paymentIntentId);
+        console.log(`Voided PayPal authorization for order ${request.paymentIntentId}`);
         break;
 
       case 'SATISPAY':

@@ -23,7 +23,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@paypal/checkout-server-sdk": "^1.0.3",
+    "@paypal/paypal-server-sdk": "^2.5.0",
     "@prisma/client": "^5.7.1",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",

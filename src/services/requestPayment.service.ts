@@ -1,10 +1,21 @@
 import { PaymentProvider } from '@prisma/client';
+import { AuthorizationStatus } from '@paypal/paypal-server-sdk';
 import prisma from '../utils/database';
 import { CURRENCY } from '../config/payments';
 import { stripeService } from './stripe.service';
 import { paypalService } from './paypal.service';
 import { satispayService } from './satispay.service';
 import { emitNewRequest } from '../socket/socket';
+
+// Where a donation is meant to end up. Each provider reads only its own fields,
+// and all-null means the money stays on the platform account - the behaviour
+// from before any of this existed, and still what happens while the DJ has not
+// connected anything.
+export interface PayoutDestination {
+  stripeAccountId?: string | null;
+  paypalMerchantId?: string | null;
+  paypalEmail?: string | null;
+}
 
 // What a guest is handed so their browser can complete the payment. Which field
 // is populated depends on the provider; the shape is stable so the client does
@@ -33,10 +44,7 @@ export async function createAuthorization(
   provider: PaymentProvider,
   requestId: string,
   amount: number,
-  // The DJ's connected Stripe account. Null means the platform keeps the money,
-  // which is the pre-Connect behaviour and what still happens while the feature
-  // is switched off.
-  stripeAccountId: string | null = null
+  destination: PayoutDestination = {}
 ): Promise<PaymentInstructions> {
   switch (provider) {
     case PaymentProvider.STRIPE: {
@@ -44,7 +52,7 @@ export async function createAuthorization(
         amount,
         CURRENCY,
         { requestId },
-        stripeAccountId
+        destination.stripeAccountId
       );
 
       return {
@@ -55,12 +63,20 @@ export async function createAuthorization(
     }
 
     case PaymentProvider.PAYPAL: {
-      const order = await paypalService.createOrder(amount);
+      // PayPal wants the currency in upper case and the amount as a decimal
+      // string, both of which the service handles; it needs the request id so
+      // the guest comes back to a page that knows what they were paying for.
+      const order = await paypalService.createOrder(
+        toCents(amount),
+        CURRENCY.toUpperCase(),
+        requestId,
+        { merchantId: destination.paypalMerchantId, email: destination.paypalEmail }
+      );
 
       return {
         provider,
         paymentIntentId: order.id,
-        approvalUrl: order.links?.find((link: { rel: string }) => link.rel === 'approve')?.href
+        approvalUrl: order.approvalUrl ?? undefined
       };
     }
 
@@ -76,7 +92,10 @@ export async function createAuthorization(
   }
 }
 
-export async function readAuthorization(
+// Not a pure read for every provider: PayPal only places the hold when it is
+// asked to, and this is where it gets asked. Idempotent all the same, because
+// both the guest's browser and the webhook come through here.
+export async function ensureAuthorization(
   provider: PaymentProvider,
   paymentIntentId: string
 ): Promise<AuthorizationState> {
@@ -95,14 +114,15 @@ export async function readAuthorization(
     }
 
     case PaymentProvider.PAYPAL: {
-      const order = await paypalService.getOrder(paymentIntentId);
-      const authorization = order.purchase_units?.[0]?.payments?.authorizations?.[0];
-      const captured = authorization?.amount;
+      // Approving an order at paypal.com does not put anything on hold. This
+      // call is what turns the approval into an authorisation, and skipping it
+      // is why capture never worked before.
+      const authorization = await paypalService.authorizeApprovedOrder(paymentIntentId);
 
       return {
-        authorized: authorization?.status === 'CREATED',
-        amountInCents: captured ? toCents(Number(captured.value)) : 0,
-        currency: captured?.currency_code ?? ''
+        authorized: authorization?.status === AuthorizationStatus.Created,
+        amountInCents: authorization?.amountInCents ?? 0,
+        currency: authorization?.currency ?? ''
       };
     }
 
@@ -146,7 +166,7 @@ export async function confirmRequestPayment(requestId: string): Promise<ConfirmO
     return { outcome: 'not_authorized', detail: 'No payment is attached to this request' };
   }
 
-  const authorization = await readAuthorization(
+  const authorization = await ensureAuthorization(
     request.paymentProvider,
     request.paymentIntentId
   );

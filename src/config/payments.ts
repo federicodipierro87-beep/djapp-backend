@@ -23,11 +23,10 @@ export function providerFor(method: PaymentMethod): PaymentProvider {
   return PROVIDER_BY_METHOD[method];
 }
 
-// Only Stripe can actually hold money today. The PayPal integration never calls
-// authorizeOrder and the Satispay request signature is not the one the API
-// expects, so both would fail - loudly if we are lucky, silently if we are not.
-// They stay off until their own phases replace them, and PAYMENT_METHODS lets a
-// staging environment switch one on early without a deploy.
+// Only Stripe is switched on in production. PayPal is implemented but has never
+// been run against a real account, and the Satispay request signature is not the
+// one that API expects, so it would fail on every call. PAYMENT_METHODS is what
+// turns one on - in staging first, and without a deploy.
 const DEFAULT_ENABLED_METHODS: PaymentMethod[] = [
   PaymentMethod.CARD,
   PaymentMethod.APPLE_PAY,

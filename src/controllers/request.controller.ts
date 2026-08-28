@@ -10,7 +10,7 @@ import { expirationService } from '../services/expiration.service';
 import {
   confirmRequestPayment,
   createAuthorization,
-  readAuthorization,
+  ensureAuthorization,
   toCents
 } from '../services/requestPayment.service';
 import {
@@ -66,7 +66,7 @@ async function resolveEventCode(eventCode: string) {
       eventId: event.id as string | null,
       minDonation: event.dj.minDonation.toNumber(),
       isActive: event.status === 'ACTIVE',
-      ...stripeDestination(event.dj)
+      ...payoutDestination(event.dj)
     };
   }
 
@@ -78,16 +78,26 @@ async function resolveEventCode(eventCode: string) {
     eventId: null,
     minDonation: dj.minDonation.toNumber(),
     isActive: true,
-    ...stripeDestination(dj)
+    ...payoutDestination(dj)
   };
 }
 
-// Having an account is not the same as being allowed to charge with it: Stripe
-// only sets chargesEnabled once it has verified the DJ's identity, and a
-// transfer to an unverified account is refused.
-function stripeDestination(dj: { stripeAccountId: string | null; chargesEnabled: boolean }) {
+// Where this DJ's donations are meant to land, one field per provider. Having
+// an account is not the same as being allowed to charge into it: Stripe only
+// sets chargesEnabled once it has verified the DJ's identity, and a transfer to
+// an unverified account is refused.
+function payoutDestination(dj: {
+  stripeAccountId: string | null;
+  chargesEnabled: boolean;
+  paypalMerchantId: string | null;
+  paypalEmail: string | null;
+}) {
   return {
-    stripeAccountId: dj.stripeAccountId,
+    destination: {
+      stripeAccountId: dj.stripeAccountId,
+      paypalMerchantId: dj.paypalMerchantId,
+      paypalEmail: dj.paypalEmail
+    },
     canReceiveStripe: Boolean(dj.stripeAccountId && dj.chargesEnabled)
   };
 }
@@ -163,12 +173,14 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
 
   let payment;
   try {
-    payment = await createAuthorization(
-      provider,
-      request.id,
-      data.donationAmount,
-      stripeConnectEnabled ? target.stripeAccountId : null
-    );
+    payment = await createAuthorization(provider, request.id, data.donationAmount, {
+      ...target.destination,
+      // With Connect off the donation still lands on the platform account, as
+      // it always has. PayPal has no equivalent switch: an order names a payee
+      // or it does not, and a DJ who has told us neither a merchant id nor a
+      // PayPal address simply falls back to the platform the same way.
+      stripeAccountId: stripeConnectEnabled ? target.destination.stripeAccountId : null
+    });
   } catch (error) {
     // A request with no way to pay for it is litter: nobody can confirm it and
     // the DJ will never see it.
@@ -206,7 +218,7 @@ async function createRequestFromExistingAuthorization(
     return res.status(400).json({ error: 'Unsupported payment' });
   }
 
-  const authorization = await readAuthorization('STRIPE', paymentIntentId).catch(() => null);
+  const authorization = await ensureAuthorization('STRIPE', paymentIntentId).catch(() => null);
 
   if (
     !authorization ||
@@ -487,11 +499,7 @@ export const rejectRequest = asyncHandler(async (req: AuthenticatedRequest, res:
 
     case 'PAYPAL':
       if (request.paymentIntentId) {
-        const order = await paypalService.getOrder(request.paymentIntentId);
-        if (order.purchase_units[0].payments?.authorizations) {
-          const authId = order.purchase_units[0].payments.authorizations[0].id;
-          await paypalService.voidAuthorization(authId);
-        }
+        await paypalService.voidOrder(request.paymentIntentId);
       }
       break;
 

@@ -29,6 +29,10 @@ model DJ {
   payoutsEnabled   Boolean        @default(false)
   stripeCustomerId String?        @unique
   paypalEmail      String?
+  // PayPal's own id for the DJ as a merchant, which is what multiparty orders
+  // name as the payee. It comes out of partner onboarding; until a DJ has been
+  // through that, their PayPal address is all we have to go on.
+  paypalMerchantId String?
   satispayId       String?
   eventCode        String         @unique
   minDonation      Decimal        @default(5.00)

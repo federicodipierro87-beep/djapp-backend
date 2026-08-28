@@ -315,11 +315,7 @@ export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: 
 
       case 'PAYPAL':
         if (request.paymentIntentId) {
-          const order = await paypalService.getOrder(request.paymentIntentId);
-          if (order.purchase_units[0].payments?.authorizations) {
-            const authId = order.purchase_units[0].payments.authorizations[0].id;
-            captureResult = await paypalService.captureAuthorization(authId);
-          }
+          captureResult = await paypalService.captureOrder(request.paymentIntentId);
         }
         break;
 
@@ -411,11 +407,7 @@ export const skipSong = asyncHandler(async (req: AuthenticatedRequest, res: Resp
 
       case 'PAYPAL':
         if (request.paymentIntentId) {
-          const order = await paypalService.getOrder(request.paymentIntentId);
-          if (order.purchase_units[0].payments?.authorizations) {
-            const authId = order.purchase_units[0].payments.authorizations[0].id;
-            cancelResult = await paypalService.voidAuthorization(authId);
-          }
+          cancelResult = await paypalService.voidOrder(request.paymentIntentId);
         }
         break;
 
