@@ -27,61 +27,53 @@ const generateEventCode = (): string => {
 };
 
 export const getSettings = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const dj = await prisma.dJ.findUnique({
-      where: { id: req.dj!.djId }
-    });
+  const dj = await prisma.dJ.findUnique({
+    where: { id: req.dj!.djId }
+  });
 
-    if (!dj) {
-      return res.status(404).json({ error: 'DJ not found' });
-    }
-
-    res.json({
-      id: dj.id,
-      email: dj.email,
-      name: dj.name,
-      firstName: dj.firstName,
-      lastName: dj.lastName,
-      address: dj.address,
-      eventCode: dj.eventCode,
-      minDonation: dj.minDonation,
-      stripeAccountId: dj.stripeAccountId,
-      paypalEmail: dj.paypalEmail,
-      createdAt: dj.createdAt,
-      updatedAt: dj.updatedAt
-    });
-  } catch (error) {
-    throw error;
+  if (!dj) {
+    return res.status(404).json({ error: 'DJ not found' });
   }
+
+  res.json({
+    id: dj.id,
+    email: dj.email,
+    name: dj.name,
+    firstName: dj.firstName,
+    lastName: dj.lastName,
+    address: dj.address,
+    eventCode: dj.eventCode,
+    minDonation: dj.minDonation,
+    stripeAccountId: dj.stripeAccountId,
+    paypalEmail: dj.paypalEmail,
+    createdAt: dj.createdAt,
+    updatedAt: dj.updatedAt
+  });
 });
 
 export const updateSettings = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const updateData = updateSettingsSchema.parse(req.body);
+  const updateData = updateSettingsSchema.parse(req.body);
 
-    const updatedDj = await prisma.dJ.update({
-      where: { id: req.dj!.djId },
-      data: updateData
-    });
+  const updatedDj = await prisma.dJ.update({
+    where: { id: req.dj!.djId },
+    data: updateData
+  });
 
-    res.json({
-      message: 'Settings updated successfully',
-      dj: {
-        id: updatedDj.id,
-        email: updatedDj.email,
-        name: updatedDj.name,
-        firstName: updatedDj.firstName,
-        lastName: updatedDj.lastName,
-        address: updatedDj.address,
-        eventCode: updatedDj.eventCode,
-        minDonation: updatedDj.minDonation,
-        stripeAccountId: updatedDj.stripeAccountId,
-        paypalEmail: updatedDj.paypalEmail
-      }
-    });
-  } catch (error) {
-    throw error;
-  }
+  res.json({
+    message: 'Settings updated successfully',
+    dj: {
+      id: updatedDj.id,
+      email: updatedDj.email,
+      name: updatedDj.name,
+      firstName: updatedDj.firstName,
+      lastName: updatedDj.lastName,
+      address: updatedDj.address,
+      eventCode: updatedDj.eventCode,
+      minDonation: updatedDj.minDonation,
+      stripeAccountId: updatedDj.stripeAccountId,
+      paypalEmail: updatedDj.paypalEmail
+    }
+  });
 });
 
 const createEventSummary = async (djId: string, eventCode: string) => {
@@ -185,214 +177,194 @@ const createEventSummary = async (djId: string, eventCode: string) => {
 };
 
 export const endCurrentEvent = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const dj = await prisma.dJ.findUnique({
-      where: { id: req.dj!.djId }
-    });
+  const dj = await prisma.dJ.findUnique({
+    where: { id: req.dj!.djId }
+  });
 
-    if (!dj) {
-      return res.status(404).json({ error: 'DJ not found' });
-    }
-
-    const eventSummary = await createEventSummary(req.dj!.djId, dj.eventCode);
-
-    await prisma.$transaction([
-      prisma.queueItem.deleteMany({
-        where: { djId: req.dj!.djId }
-      }),
-      prisma.request.updateMany({
-        where: { 
-          djId: req.dj!.djId,
-          status: 'PENDING'
-        },
-        data: { status: 'EXPIRED' }
-      }),
-      prisma.request.updateMany({
-        where: { 
-          djId: req.dj!.djId,
-          status: 'ACCEPTED'
-        },
-        data: { status: 'CLOSED' }
-      })
-    ]);
-
-    res.json({
-      message: 'Event ended successfully',
-      summary: eventSummary
-    });
-  } catch (error) {
-    throw error;
+  if (!dj) {
+    return res.status(404).json({ error: 'DJ not found' });
   }
+
+  const eventSummary = await createEventSummary(req.dj!.djId, dj.eventCode);
+
+  await prisma.$transaction([
+    prisma.queueItem.deleteMany({
+      where: { djId: req.dj!.djId }
+    }),
+    prisma.request.updateMany({
+      where: { 
+        djId: req.dj!.djId,
+        status: 'PENDING'
+      },
+      data: { status: 'EXPIRED' }
+    }),
+    prisma.request.updateMany({
+      where: { 
+        djId: req.dj!.djId,
+        status: 'ACCEPTED'
+      },
+      data: { status: 'CLOSED' }
+    })
+  ]);
+
+  res.json({
+    message: 'Event ended successfully',
+    summary: eventSummary
+  });
 });
 
 export const generateNewEventCode = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const dj = await prisma.dJ.findUnique({
-      where: { id: req.dj!.djId }
-    });
+  const dj = await prisma.dJ.findUnique({
+    where: { id: req.dj!.djId }
+  });
 
-    if (!dj) {
-      return res.status(404).json({ error: 'DJ not found' });
-    }
-
-    const eventSummary = await createEventSummary(req.dj!.djId, dj.eventCode);
-
-    let eventCode: string;
-    let isUnique = false;
-    
-    while (!isUnique) {
-      eventCode = generateEventCode();
-      const existing = await prisma.dJ.findUnique({
-        where: { eventCode }
-      });
-      if (!existing) isUnique = true;
-    }
-
-    const updatedDj = await prisma.dJ.update({
-      where: { id: req.dj!.djId },
-      data: { eventCode: eventCode! }
-    });
-
-    await prisma.$transaction([
-      prisma.queueItem.deleteMany({
-        where: { djId: req.dj!.djId }
-      }),
-      prisma.request.updateMany({
-        where: { 
-          djId: req.dj!.djId,
-          status: 'PENDING'
-        },
-        data: { status: 'EXPIRED' }
-      }),
-      prisma.request.updateMany({
-        where: { 
-          djId: req.dj!.djId,
-          status: 'ACCEPTED'
-        },
-        data: { status: 'CLOSED' }
-      })
-    ]);
-
-    res.json({
-      message: 'New event started successfully',
-      eventCode: updatedDj.eventCode,
-      eventUrl: `${process.env.FRONTEND_URL}/event/${updatedDj.eventCode}`,
-      previousEventSummary: eventSummary
-    });
-  } catch (error) {
-    throw error;
+  if (!dj) {
+    return res.status(404).json({ error: 'DJ not found' });
   }
+
+  const eventSummary = await createEventSummary(req.dj!.djId, dj.eventCode);
+
+  let eventCode: string;
+  let isUnique = false;
+  
+  while (!isUnique) {
+    eventCode = generateEventCode();
+    const existing = await prisma.dJ.findUnique({
+      where: { eventCode }
+    });
+    if (!existing) isUnique = true;
+  }
+
+  const updatedDj = await prisma.dJ.update({
+    where: { id: req.dj!.djId },
+    data: { eventCode: eventCode! }
+  });
+
+  await prisma.$transaction([
+    prisma.queueItem.deleteMany({
+      where: { djId: req.dj!.djId }
+    }),
+    prisma.request.updateMany({
+      where: { 
+        djId: req.dj!.djId,
+        status: 'PENDING'
+      },
+      data: { status: 'EXPIRED' }
+    }),
+    prisma.request.updateMany({
+      where: { 
+        djId: req.dj!.djId,
+        status: 'ACCEPTED'
+      },
+      data: { status: 'CLOSED' }
+    })
+  ]);
+
+  res.json({
+    message: 'New event started successfully',
+    eventCode: updatedDj.eventCode,
+    eventUrl: `${process.env.FRONTEND_URL}/event/${updatedDj.eventCode}`,
+    previousEventSummary: eventSummary
+  });
 });
 
 export const getEventSummaries = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const summaries = await prisma.eventSummary.findMany({
-      where: { djId: req.dj!.djId },
-      orderBy: { endedAt: 'desc' }
-    });
+  const summaries = await prisma.eventSummary.findMany({
+    where: { djId: req.dj!.djId },
+    orderBy: { endedAt: 'desc' }
+  });
 
-    res.json(summaries);
-  } catch (error) {
-    throw error;
-  }
+  res.json(summaries);
 });
 
 export const deleteEventSummary = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { id } = req.params;
+  const { id } = req.params;
 
-    const eventSummary = await prisma.eventSummary.findUnique({
-      where: { id }
-    });
+  const eventSummary = await prisma.eventSummary.findUnique({
+    where: { id }
+  });
 
-    if (!eventSummary || eventSummary.djId !== req.dj!.djId) {
-      return res.status(404).json({ error: 'Event summary not found' });
-    }
-
-    await prisma.eventSummary.delete({
-      where: { id }
-    });
-
-    res.json({ message: 'Event summary deleted successfully' });
-  } catch (error) {
-    throw error;
+  if (!eventSummary || eventSummary.djId !== req.dj!.djId) {
+    return res.status(404).json({ error: 'Event summary not found' });
   }
+
+  await prisma.eventSummary.delete({
+    where: { id }
+  });
+
+  res.json({ message: 'Event summary deleted successfully' });
 });
 
 export const getEventStats = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    // Trova l'ultimo evento terminato per filtrare solo le statistiche dell'evento corrente
-    const lastEventSummary = await prisma.eventSummary.findFirst({
-      where: { djId: req.dj!.djId },
-      orderBy: { endedAt: 'desc' }
-    });
+  // Trova l'ultimo evento terminato per filtrare solo le statistiche dell'evento corrente
+  const lastEventSummary = await prisma.eventSummary.findFirst({
+    where: { djId: req.dj!.djId },
+    orderBy: { endedAt: 'desc' }
+  });
 
-    // Se c'è un evento terminato, filtra solo le richieste successive
-    const eventStartTime = lastEventSummary ? lastEventSummary.endedAt : new Date(0);
+  // Se c'è un evento terminato, filtra solo le richieste successive
+  const eventStartTime = lastEventSummary ? lastEventSummary.endedAt : new Date(0);
 
-    const [
-      totalRequests,
-      pendingRequests,
-      acceptedRequests,
-      queueLength,
-      totalEarnings
-    ] = await Promise.all([
-      prisma.request.count({
-        where: {
-          djId: req.dj!.djId,
-          status: { not: 'AWAITING_PAYMENT' },
-          createdAt: { gt: eventStartTime }
-        }
-      }),
-      prisma.request.count({
-        where: { 
-          djId: req.dj!.djId,
-          status: 'PENDING',
-          createdAt: { gt: eventStartTime }
-        }
-      }),
-      prisma.request.count({
-        where: { 
-          djId: req.dj!.djId,
-          status: 'ACCEPTED',
-          createdAt: { gt: eventStartTime }
-        }
-      }),
-      prisma.queueItem.count({
-        where: { djId: req.dj!.djId }
-      }),
-      // Calcola i guadagni solo dalle canzoni PLAYED dell'evento corrente
-      prisma.queueItem.findMany({
-        where: { 
-          djId: req.dj!.djId,
-          status: 'PLAYED'
-        },
-        include: {
-          request: true
-        }
-      })
-    ]);
-
-    // Calcola i guadagni sommando le donazioni delle canzoni PLAYED dell'evento corrente
-    const calculatedEarnings = totalEarnings.reduce((sum, queueItem) => {
-      // Solo le richieste create dopo l'ultimo evento terminato
-      if (queueItem.request.createdAt > eventStartTime) {
-        return sum + queueItem.request.donationAmount.toNumber();
+  const [
+    totalRequests,
+    pendingRequests,
+    acceptedRequests,
+    queueLength,
+    totalEarnings
+  ] = await Promise.all([
+    prisma.request.count({
+      where: {
+        djId: req.dj!.djId,
+        status: { not: 'AWAITING_PAYMENT' },
+        createdAt: { gt: eventStartTime }
       }
-      return sum;
-    }, 0);
+    }),
+    prisma.request.count({
+      where: { 
+        djId: req.dj!.djId,
+        status: 'PENDING',
+        createdAt: { gt: eventStartTime }
+      }
+    }),
+    prisma.request.count({
+      where: { 
+        djId: req.dj!.djId,
+        status: 'ACCEPTED',
+        createdAt: { gt: eventStartTime }
+      }
+    }),
+    prisma.queueItem.count({
+      where: { djId: req.dj!.djId }
+    }),
+    // Calcola i guadagni solo dalle canzoni PLAYED dell'evento corrente
+    prisma.queueItem.findMany({
+      where: { 
+        djId: req.dj!.djId,
+        status: 'PLAYED'
+      },
+      include: {
+        request: true
+      }
+    })
+  ]);
 
-    res.json({
-      totalRequests,
-      pendingRequests,
-      acceptedRequests,
-      rejectedRequests: totalRequests - pendingRequests - acceptedRequests,
-      queueLength,
-      totalEarnings: calculatedEarnings
-    });
-  } catch (error) {
-    throw error;
-  }
+  // Calcola i guadagni sommando le donazioni delle canzoni PLAYED dell'evento corrente
+  const calculatedEarnings = totalEarnings.reduce((sum, queueItem) => {
+    // Solo le richieste create dopo l'ultimo evento terminato
+    if (queueItem.request.createdAt > eventStartTime) {
+      return sum + queueItem.request.donationAmount.toNumber();
+    }
+    return sum;
+  }, 0);
+
+  res.json({
+    totalRequests,
+    pendingRequests,
+    acceptedRequests,
+    rejectedRequests: totalRequests - pendingRequests - acceptedRequests,
+    queueLength,
+    totalEarnings: calculatedEarnings
+  });
 });
 
 const changePasswordSchema = z.object({
@@ -402,65 +374,57 @@ const changePasswordSchema = z.object({
 });
 
 export const changePassword = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+  const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
 
-    const dj = await prisma.dJ.findUnique({
-      where: { id: req.dj!.djId }
-    });
+  const dj = await prisma.dJ.findUnique({
+    where: { id: req.dj!.djId }
+  });
 
-    if (!dj) {
-      return res.status(404).json({ error: 'DJ not found' });
-    }
-
-    // Verify current password
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, dj.password);
-    if (!isCurrentPasswordValid) {
-      return res.status(400).json({ error: 'Password attuale non corretta' });
-    }
-
-    // Hash new password
-    const hashedNewPassword = await bcrypt.hash(newPassword, 12);
-
-    // Update password
-    await prisma.dJ.update({
-      where: { id: req.dj!.djId },
-      data: { password: hashedNewPassword }
-    });
-
-    res.json({ message: 'Password aggiornata con successo' });
-  } catch (error) {
-    throw error;
+  if (!dj) {
+    return res.status(404).json({ error: 'DJ not found' });
   }
+
+  // Verify current password
+  const isCurrentPasswordValid = await bcrypt.compare(currentPassword, dj.password);
+  if (!isCurrentPasswordValid) {
+    return res.status(400).json({ error: 'Password attuale non corretta' });
+  }
+
+  // Hash new password
+  const hashedNewPassword = await bcrypt.hash(newPassword, 12);
+
+  // Update password
+  await prisma.dJ.update({
+    where: { id: req.dj!.djId },
+    data: { password: hashedNewPassword }
+  });
+
+  res.json({ message: 'Password aggiornata con successo' });
 });
 
 export const generateQRCode = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const dj = await prisma.dJ.findUnique({
-      where: { id: req.dj!.djId }
-    });
+  const dj = await prisma.dJ.findUnique({
+    where: { id: req.dj!.djId }
+  });
 
-    if (!dj) {
-      return res.status(404).json({ error: 'DJ not found' });
-    }
-
-    const eventUrl = `${process.env.FRONTEND_URL}/event/${dj.eventCode}`;
-    
-    const qrCodeDataUrl = await QRCode.toDataURL(eventUrl, {
-      width: 400,
-      margin: 2,
-      color: {
-        dark: '#000000',
-        light: '#FFFFFF'
-      }
-    });
-
-    res.json({
-      qrCode: qrCodeDataUrl,
-      eventCode: dj.eventCode,
-      eventUrl
-    });
-  } catch (error) {
-    throw error;
+  if (!dj) {
+    return res.status(404).json({ error: 'DJ not found' });
   }
+
+  const eventUrl = `${process.env.FRONTEND_URL}/event/${dj.eventCode}`;
+  
+  const qrCodeDataUrl = await QRCode.toDataURL(eventUrl, {
+    width: 400,
+    margin: 2,
+    color: {
+      dark: '#000000',
+      light: '#FFFFFF'
+    }
+  });
+
+  res.json({
+    qrCode: qrCodeDataUrl,
+    eventCode: dj.eventCode,
+    eventUrl
+  });
 });

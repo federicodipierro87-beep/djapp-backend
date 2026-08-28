@@ -27,140 +27,128 @@ const generateEventCode = (): string => {
 };
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const { email, password, name } = registerSchema.parse(req.body);
-    
-    const hashedPassword = await bcrypt.hash(password, 12);
-    
-    let eventCode: string;
-    let isUnique = false;
-    
-    while (!isUnique) {
-      eventCode = generateEventCode();
-      const existing = await prisma.dJ.findUnique({
-        where: { eventCode }
-      });
-      if (!existing) isUnique = true;
-    }
-    
-    const dj = await prisma.dJ.create({
-      data: {
-        email,
-        password: hashedPassword,
-        name,
-        eventCode: eventCode!,
-        status: 'PENDING'
-      }
+  const { email, password, name } = registerSchema.parse(req.body);
+  
+  const hashedPassword = await bcrypt.hash(password, 12);
+  
+  let eventCode: string;
+  let isUnique = false;
+  
+  while (!isUnique) {
+    eventCode = generateEventCode();
+    const existing = await prisma.dJ.findUnique({
+      where: { eventCode }
     });
-
-    res.status(201).json({
-      message: 'Registrazione completata! In attesa di approvazione da parte dell\'amministratore.',
-      dj: {
-        id: dj.id,
-        email: dj.email,
-        name: dj.name,
-        status: dj.status
-      }
-    });
-  } catch (error) {
-    throw error;
+    if (!existing) isUnique = true;
   }
+  
+  const dj = await prisma.dJ.create({
+    data: {
+      email,
+      password: hashedPassword,
+      name,
+      eventCode: eventCode!,
+      status: 'PENDING'
+    }
+  });
+
+  res.status(201).json({
+    message: 'Registrazione completata! In attesa di approvazione da parte dell\'amministratore.',
+    dj: {
+      id: dj.id,
+      email: dj.email,
+      name: dj.name,
+      status: dj.status
+    }
+  });
 });
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const { email, password } = loginSchema.parse(req.body);
+  const { email, password } = loginSchema.parse(req.body);
 
-    const dj = await prisma.dJ.findUnique({
-      where: { email }
-    });
+  const dj = await prisma.dJ.findUnique({
+    where: { email }
+  });
 
-    if (!dj) {
-      return res.status(400).json({ error: 'Invalid credentials' });
-    }
+  if (!dj) {
+    return res.status(400).json({ error: 'Invalid credentials' });
+  }
 
-    const isPasswordValid = await bcrypt.compare(password, dj.password);
+  const isPasswordValid = await bcrypt.compare(password, dj.password);
 
-    if (!isPasswordValid) {
-      return res.status(400).json({ error: 'Invalid credentials' });
-    }
+  if (!isPasswordValid) {
+    return res.status(400).json({ error: 'Invalid credentials' });
+  }
 
-    // Check if this is an admin login
-    if (dj.isAdmin) {
-      const token = generateToken({
-        djId: dj.id,
-        email: dj.email,
-        isAdmin: true
-      });
-
-      return res.json({
-        message: 'Admin login successful',
-        token,
-        isAdmin: true,
-        dj: {
-          id: dj.id,
-          email: dj.email,
-          name: dj.name
-        }
-      });
-    }
-
-    // Check DJ status for regular users
-    if (dj.status === 'PENDING') {
-      return res.status(403).json({ error: 'Il tuo account è in attesa di approvazione dall\'amministratore.' });
-    }
-
-    if (dj.status === 'REJECTED') {
-      return res.status(403).json({ error: 'Il tuo account è stato respinto dall\'amministratore.' });
-    }
-
+  // Check if this is an admin login
+  if (dj.isAdmin) {
     const token = generateToken({
       djId: dj.id,
-      email: dj.email
+      email: dj.email,
+      isAdmin: true
     });
 
-    // Get subscription status for the DJ
-    const subscriptionStatus = await subscriptionService.getSubscriptionStatus(dj.id);
-
-    res.json({
-      message: 'Login successful',
+    return res.json({
+      message: 'Admin login successful',
       token,
+      isAdmin: true,
       dj: {
         id: dj.id,
         email: dj.email,
-        name: dj.name,
-        eventCode: dj.eventCode,
-        minDonation: dj.minDonation
-      },
-      subscription: subscriptionStatus
+        name: dj.name
+      }
     });
-  } catch (error) {
-    throw error;
   }
-});
 
-export const me = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const dj = await prisma.dJ.findUnique({
-      where: { id: req.dj!.djId }
-    });
+  // Check DJ status for regular users
+  if (dj.status === 'PENDING') {
+    return res.status(403).json({ error: 'Il tuo account è in attesa di approvazione dall\'amministratore.' });
+  }
 
-    if (!dj) {
-      return res.status(404).json({ error: 'DJ not found' });
-    }
+  if (dj.status === 'REJECTED') {
+    return res.status(403).json({ error: 'Il tuo account è stato respinto dall\'amministratore.' });
+  }
 
-    res.json({
+  const token = generateToken({
+    djId: dj.id,
+    email: dj.email
+  });
+
+  // Get subscription status for the DJ
+  const subscriptionStatus = await subscriptionService.getSubscriptionStatus(dj.id);
+
+  res.json({
+    message: 'Login successful',
+    token,
+    dj: {
       id: dj.id,
       email: dj.email,
       name: dj.name,
       eventCode: dj.eventCode,
-      minDonation: dj.minDonation,
-      stripeAccountId: dj.stripeAccountId,
-      paypalEmail: dj.paypalEmail,
-      createdAt: dj.createdAt,
-      updatedAt: dj.updatedAt
-    });
-  } catch (error) {
-    throw error;
+      minDonation: dj.minDonation
+    },
+    subscription: subscriptionStatus
+  });
+});
+
+export const me = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const dj = await prisma.dJ.findUnique({
+    where: { id: req.dj!.djId }
+  });
+
+  if (!dj) {
+    return res.status(404).json({ error: 'DJ not found' });
   }
+
+  res.json({
+    id: dj.id,
+    email: dj.email,
+    name: dj.name,
+    eventCode: dj.eventCode,
+    minDonation: dj.minDonation,
+    stripeAccountId: dj.stripeAccountId,
+    paypalEmail: dj.paypalEmail,
+    createdAt: dj.createdAt,
+    updatedAt: dj.updatedAt
+  });
 });

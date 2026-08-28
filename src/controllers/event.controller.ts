@@ -106,53 +106,41 @@ export const createEvent = asyncHandler(async (req: AuthenticatedRequest, res: R
 });
 
 export const getMyEvents = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const djId = req.dj!.djId;
-    const events = await eventService.getEventsByDj(djId);
-    res.json(events);
-  } catch (error) {
-    throw error;
-  }
+  const djId = req.dj!.djId;
+  const events = await eventService.getEventsByDj(djId);
+  res.json(events);
 });
 
 export const getNearbyEvents = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const query = nearbyQuerySchema.parse(req.query);
+  const query = nearbyQuerySchema.parse(req.query);
 
-    if (isNaN(query.lat) || isNaN(query.lng)) {
-      return res.status(400).json({ error: 'Invalid coordinates' });
-    }
-
-    if (query.radius < 1 || query.radius > 500) {
-      return res.status(400).json({ error: 'Radius must be between 1 and 500 km' });
-    }
-
-    const events = await eventService.getNearbyEvents(
-      query.lat,
-      query.lng,
-      query.radius,
-      query.status
-    );
-
-    res.json(events);
-  } catch (error) {
-    throw error;
+  if (isNaN(query.lat) || isNaN(query.lng)) {
+    return res.status(400).json({ error: 'Invalid coordinates' });
   }
+
+  if (query.radius < 1 || query.radius > 500) {
+    return res.status(400).json({ error: 'Radius must be between 1 and 500 km' });
+  }
+
+  const events = await eventService.getNearbyEvents(
+    query.lat,
+    query.lng,
+    query.radius,
+    query.status
+  );
+
+  res.json(events);
 });
 
 export const getEventByCode = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const { eventCode } = req.params;
-    const event = await eventService.getEventByCode(eventCode);
+  const { eventCode } = req.params;
+  const event = await eventService.getEventByCode(eventCode);
 
-    if (!event) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-
-    res.json(event);
-  } catch (error) {
-    throw error;
+  if (!event) {
+    return res.status(404).json({ error: 'Event not found' });
   }
+
+  res.json(event);
 });
 
 // Everything a guest needs before filing a request, for both the new Event

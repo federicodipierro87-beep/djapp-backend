@@ -5,7 +5,9 @@ export const errorMiddleware = (
   error: any,
   req: Request,
   res: Response,
-  next: NextFunction
+  // Unused, but Express decides a handler is an error handler by counting its
+  // arguments: with three it becomes ordinary middleware and never runs.
+  _next: NextFunction
 ) => {
   console.error('Error:', error);
 
