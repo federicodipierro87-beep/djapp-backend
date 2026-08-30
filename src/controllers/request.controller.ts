@@ -3,10 +3,12 @@ import { z } from 'zod';
 import { Prisma, RequestStatus } from '@prisma/client';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
-import { stripeService } from '../services/stripe.service';
-import { paypalService } from '../services/paypal.service';
-import { satispayCredentialsFor, satispayService } from '../services/satispay.service';
+import { satispayCredentialsFor } from '../services/satispay.service';
 import { expirationService } from '../services/expiration.service';
+import {
+  recordReleaseOutcome,
+  releaseAuthorization
+} from '../services/paymentRelease.service';
 import {
   confirmRequestPayment,
   createAuthorization,
@@ -511,34 +513,11 @@ export const rejectRequest = asyncHandler(async (req: AuthenticatedRequest, res:
     return res.status(400).json({ error: 'Request cannot be rejected' });
   }
 
-  switch (request.paymentMethod) {
-    case 'CARD':
-    case 'APPLE_PAY':
-    case 'GOOGLE_PAY':
-      if (request.paymentIntentId) {
-        await stripeService.cancelPaymentIntent(request.paymentIntentId);
-      }
-      break;
-
-    case 'PAYPAL':
-      if (request.paymentIntentId) {
-        await paypalService.voidOrder(request.paymentIntentId);
-      }
-      break;
-
-    case 'SATISPAY': {
-      const credentials = satispayCredentialsFor(request.dj);
-      if (request.paymentIntentId && credentials) {
-        await satispayService.cancelPayment(credentials, request.paymentIntentId);
-      }
-      break;
-    }
-  }
-
-  await prisma.request.update({
-    where: { id },
-    data: { paymentStatus: 'CANCELED' }
-  });
+  // The rejection is already recorded, so a provider being down is not the DJ's
+  // problem and must not come back as a 500. The row stays AUTHORIZED and the
+  // reconciliation sweep retries it.
+  const outcome = await releaseAuthorization(request);
+  await recordReleaseOutcome(request.id, outcome);
 
   // Emit socket event for rejected request
   const code = broadcastCode(request);

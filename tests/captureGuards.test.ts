@@ -8,6 +8,10 @@ import { Prisma } from '@prisma/client';
 const queueFindUnique = vi.fn();
 const queueUpdateMany = vi.fn();
 const requestUpdate = vi.fn();
+// Skipping now goes through the shared release module, which never writes the
+// payment status with a bare update: the `where` is what stops a concurrent
+// capture being overwritten.
+const requestUpdateMany = vi.fn();
 
 const capturePaymentIntent = vi.fn();
 const cancelPaymentIntent = vi.fn();
@@ -20,7 +24,10 @@ vi.mock('../src/utils/database', () => ({
       findUnique: (...args: unknown[]) => queueFindUnique(...args),
       updateMany: (...args: unknown[]) => queueUpdateMany(...args)
     },
-    request: { update: (...args: unknown[]) => requestUpdate(...args) }
+    request: {
+      update: (...args: unknown[]) => requestUpdate(...args),
+      updateMany: (...args: unknown[]) => requestUpdateMany(...args)
+    }
   }
 }));
 
@@ -39,7 +46,7 @@ vi.mock('../src/services/paypal.service', () => ({
 }));
 
 vi.mock('../src/services/satispay.service', () => ({
-  satispayService: {},
+  satispayService: { cancelPayment: vi.fn(), getPayment: vi.fn() },
   satispayCredentialsFor: () => null
 }));
 
@@ -93,6 +100,7 @@ beforeEach(() => {
   queueFindUnique.mockResolvedValue(queueItem);
   queueUpdateMany.mockResolvedValue({ count: 1 });
   requestUpdate.mockResolvedValue({});
+  requestUpdateMany.mockResolvedValue({ count: 1 });
   capturePaymentIntent.mockResolvedValue({ id: 'pi_1', status: 'succeeded' });
   cancelPaymentIntent.mockResolvedValue({ id: 'pi_1', status: 'canceled' });
 });
@@ -205,5 +213,30 @@ describe('skipSong', () => {
 
     expect(res.status).toHaveBeenCalledWith(404);
     expect(cancelPaymentIntent).not.toHaveBeenCalled();
+  });
+
+  // A bare update here would overwrite a capture that landed in between. The
+  // queue claim above does not cover it: the two rows are different rows.
+  it('records the cancellation only over a row that still holds money', async () => {
+    await invoke(skipSong, 'dj-1');
+
+    expect(requestUpdate).not.toHaveBeenCalled();
+    expect(requestUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'req-1', paymentStatus: { in: ['AUTHORIZED', 'PENDING'] } },
+      data: { paymentStatus: 'CANCELED' }
+    });
+  });
+
+  // The song is skipped either way. What must not happen is claiming the money
+  // was released when it is still on hold.
+  it('reports a failed release instead of silently marking it cancelled', async () => {
+    cancelPaymentIntent.mockRejectedValue(new Error('stripe down'));
+
+    const { res } = await invoke(skipSong, 'dj-1');
+
+    expect(requestUpdateMany).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ cancelError: 'stripe down' })
+    );
   });
 });

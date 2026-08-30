@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import QRCode from 'qrcode';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { closeOutstandingRequests, releaseInBackground } from '../services/paymentRelease.service';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const updateSettingsSchema = z.object({
@@ -187,30 +188,21 @@ export const endCurrentEvent = asyncHandler(async (req: AuthenticatedRequest, re
 
   const eventSummary = await createEventSummary(req.dj!.djId, dj.eventCode);
 
-  await prisma.$transaction([
-    prisma.queueItem.deleteMany({
-      where: { djId: req.dj!.djId }
-    }),
-    prisma.request.updateMany({
-      where: { 
-        djId: req.dj!.djId,
-        status: 'PENDING'
-      },
-      data: { status: 'EXPIRED' }
-    }),
-    prisma.request.updateMany({
-      where: { 
-        djId: req.dj!.djId,
-        status: 'ACCEPTED'
-      },
-      data: { status: 'CLOSED' }
-    })
-  ]);
+  // Scoped by DJ, exactly as the updateMany calls it replaces were. Narrowing it
+  // to eventId: null would leave the Event-system requests of a DJ who uses both
+  // systems open, which is a regression rather than a tightening.
+  const holds = await closeOutstandingRequests({ djId: req.dj!.djId });
 
   res.json({
     message: 'Event ended successfully',
     summary: eventSummary
   });
+
+  // After the response, on purpose. Forty guests is forty provider round trips,
+  // which is a spinner long enough to hit the proxy timeout while the house
+  // lights are coming up - and nothing here depends on the answer. Whatever
+  // fails is left AUTHORIZED and picked up by the reconciliation sweep.
+  releaseInBackground(holds);
 });
 
 export const generateNewEventCode = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
@@ -240,25 +232,7 @@ export const generateNewEventCode = asyncHandler(async (req: AuthenticatedReques
     data: { eventCode: eventCode! }
   });
 
-  await prisma.$transaction([
-    prisma.queueItem.deleteMany({
-      where: { djId: req.dj!.djId }
-    }),
-    prisma.request.updateMany({
-      where: { 
-        djId: req.dj!.djId,
-        status: 'PENDING'
-      },
-      data: { status: 'EXPIRED' }
-    }),
-    prisma.request.updateMany({
-      where: { 
-        djId: req.dj!.djId,
-        status: 'ACCEPTED'
-      },
-      data: { status: 'CLOSED' }
-    })
-  ]);
+  const holds = await closeOutstandingRequests({ djId: req.dj!.djId });
 
   res.json({
     message: 'New event started successfully',
@@ -266,6 +240,8 @@ export const generateNewEventCode = asyncHandler(async (req: AuthenticatedReques
     eventUrl: `${process.env.FRONTEND_URL}/event/${updatedDj.eventCode}`,
     previousEventSummary: eventSummary
   });
+
+  releaseInBackground(holds);
 });
 
 export const getEventSummaries = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

@@ -6,6 +6,10 @@ import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { stripeService } from '../services/stripe.service';
 import { paypalService } from '../services/paypal.service';
 import { satispayCredentialsFor, satispayService } from '../services/satispay.service';
+import {
+  recordReleaseOutcome,
+  releaseAuthorization
+} from '../services/paymentRelease.service';
 import { toCents } from '../services/requestPayment.service';
 import { emitQueueUpdated, emitNowPlayingChanged } from '../socket/socket';
 import { broadcastCode } from '../socket/broadcastCode';
@@ -404,46 +408,16 @@ export const skipSong = asyncHandler(async (req: AuthenticatedRequest, res: Resp
   }
 
   const request = queueItem.request;
-  let cancelResult;
-  let cancelError: string | null = null;
 
-  // Cancella il pagamento dato che la canzone viene skippata
-  try {
-    switch (request.paymentMethod) {
-      case 'CARD':
-      case 'APPLE_PAY':
-      case 'GOOGLE_PAY':
-        if (request.paymentIntentId) {
-          cancelResult = await stripeService.cancelPaymentIntent(request.paymentIntentId);
-        }
-        break;
+  // The song is skipped either way; the money is a separate question. A failure
+  // here leaves the row AUTHORIZED for the reconciliation sweep to retry, and is
+  // surfaced rather than swallowed.
+  const outcome = await releaseAuthorization({ ...request, dj: queueItem.dj });
+  await recordReleaseOutcome(request.id, outcome);
 
-      case 'PAYPAL':
-        if (request.paymentIntentId) {
-          cancelResult = await paypalService.voidOrder(request.paymentIntentId);
-        }
-        break;
-
-      case 'SATISPAY': {
-        const credentials = satispayCredentialsFor(queueItem.dj);
-        if (request.paymentIntentId && credentials) {
-          cancelResult = await satispayService.cancelPayment(credentials, request.paymentIntentId);
-        }
-        break;
-      }
-    }
-  } catch (error) {
-    // The authorisation expires on its own at the provider, so a failure here
-    // costs the guest nothing, but it must not be swallowed.
-    console.error(`Payment cancellation failed for request ${request.id}:`, error);
-    cancelError = error instanceof Error ? error.message : 'Payment cancellation failed';
-  }
-
-  if (!cancelError) {
-    await prisma.request.update({
-      where: { id: request.id },
-      data: { paymentStatus: 'CANCELED' }
-    });
+  const cancelError = outcome.released ? null : outcome.detail;
+  if (cancelError) {
+    console.error(`Payment cancellation failed for request ${request.id}: ${cancelError}`);
   }
 
   const code = broadcastCode(queueItem);
@@ -455,7 +429,6 @@ export const skipSong = asyncHandler(async (req: AuthenticatedRequest, res: Resp
     message: cancelError
       ? 'Song skipped but the authorisation could not be released'
       : 'Song skipped and payment cancelled - no charge to customer',
-    cancelResult,
     cancelError
   });
 });

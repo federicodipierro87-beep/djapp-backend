@@ -1,47 +1,69 @@
 import cron from 'node-cron';
-import { Prisma } from '@prisma/client';
 import prisma from '../utils/database';
-import { stripeService } from './stripe.service';
-import { paypalService } from './paypal.service';
-import { satispayCredentialsFor, satispayService } from './satispay.service';
+import {
+  RELEASABLE_FIELDS,
+  releaseAll,
+  releaseAuthorization,
+  recordReleaseOutcome
+} from './paymentRelease.service';
 import { AWAITING_PAYMENT_TIMEOUT_MS } from '../config/payments';
 
-export const EXPIRATION_MINUTES = 180;
-export const EXPIRATION_MS = EXPIRATION_MINUTES * 60 * 1000;
+// The safety net, not the normal path. A hold is now released the moment the
+// event ends; this only catches the DJ who never closes anything. Twelve hours
+// is long enough to cover a night that runs into the morning and short enough
+// that a guest's card is not still blocked the following evening.
+export const EXPIRATION_HOURS = 12;
+export const EXPIRATION_MS = EXPIRATION_HOURS * 60 * 60 * 1000;
 
-// Only the columns this service actually reads. Widening it later is a compile
-// error rather than a silent `any` access.
+// A terminal row whose money is still on hold has been sitting there for at
+// least this long, so nothing is half-written and no controller is mid-flight.
+const RECONCILE_GRACE_MS = 2 * 60 * 1000;
+
+// Past this, every provider has released the authorisation itself. Retrying
+// would only produce errors on rows nobody can do anything about.
+const RECONCILE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 const EXPIRABLE_FIELDS = {
-  id: true,
-  songTitle: true,
-  paymentMethod: true,
-  paymentIntentId: true,
-  // Releasing a Satispay fund lock is a call into the DJ's own business
-  // account, so it cannot be done without their credentials.
-  dj: { select: { satispayKeyId: true, satispayPrivateKey: true } }
+  ...RELEASABLE_FIELDS,
+  // Which terminal status this row is on its way to.
+  status: true
 } as const;
 
-type ExpirableRequest = Prisma.RequestGetPayload<{ select: typeof EXPIRABLE_FIELDS }>;
-
 export class ExpirationService {
-  private task: cron.ScheduledTask | null = null;
+  private tasks: cron.ScheduledTask[] = [];
 
   start() {
-    this.task = cron.schedule('* * * * *', async () => {
-      try {
-        await this.expireOldRequests();
-        await this.expireAbandonedDrafts();
-      } catch (error) {
-        console.error('Error in expiration service:', error);
-      }
-    });
+    this.tasks.push(
+      cron.schedule('* * * * *', async () => {
+        try {
+          await this.expireOldRequests();
+          await this.expireAbandonedDrafts();
+        } catch (error) {
+          console.error('Error in expiration service:', error);
+        }
+      })
+    );
 
-    console.log('Expiration service started - checking every minute');
+    // Every five minutes rather than every minute: if a provider is down, a
+    // one-minute retry is 1440 failed calls a day for the same rows.
+    this.tasks.push(
+      cron.schedule('*/5 * * * *', async () => {
+        try {
+          await this.reconcileHolds();
+        } catch (error) {
+          console.error('Error in hold reconciliation:', error);
+        }
+      })
+    );
+
+    console.log('Expiration service started - expiry every minute, reconciliation every 5');
   }
 
   stop() {
-    this.task?.stop();
-    this.task = null;
+    for (const task of this.tasks) {
+      task.stop();
+    }
+    this.tasks = [];
   }
 
   private async expireOldRequests() {
@@ -49,7 +71,19 @@ export class ExpirationService {
 
     const candidates = await prisma.request.findMany({
       where: {
-        status: 'PENDING',
+        // ACCEPTED used to never expire at all, so a DJ who accepted a song and
+        // then went home left the guest's card blocked until the provider gave
+        // up on its own.
+        status: { in: ['PENDING', 'ACCEPTED'] },
+        // Only rows where money is genuinely on hold. A request whose capture
+        // failed is deliberately excluded: nobody knows whether the money moved,
+        // and a blind release could hand back a donation already collected.
+        paymentStatus: 'AUTHORIZED',
+        // createdAt, not authorizedAt. authorizedAt is nullable and is null on
+        // every row written before the invert_payment_flow migration, and in SQL
+        // `NULL < cutoff` is UNKNOWN - those rows would never expire, silently,
+        // on real money. The gap between the two is at most the 30 minutes a
+        // draft is allowed to live, and it errs towards releasing sooner.
         createdAt: { lt: expirationTime }
       },
       select: EXPIRABLE_FIELDS
@@ -61,19 +95,25 @@ export class ExpirationService {
 
     for (const request of candidates) {
       try {
-        // Claim the row first. If the DJ accepted it in the meantime the status
-        // is no longer PENDING, no row is updated, and we must not touch the
+        // Claim the row first. If the DJ moved it in the meantime the status no
+        // longer matches, no row is updated, and we must not touch an
         // authorisation the queue still depends on.
+        //
+        // paymentStatus is deliberately not part of this write: it records where
+        // the money is, and the money has not moved yet. It is set below, only
+        // once a provider confirms the release - which is what leaves a failed
+        // release AUTHORIZED and findable by reconcileHolds.
         const claimed = await prisma.request.updateMany({
-          where: { id: request.id, status: 'PENDING' },
-          data: { status: 'EXPIRED', paymentStatus: 'CANCELED' }
+          where: { id: request.id, status: request.status },
+          data: { status: request.status === 'PENDING' ? 'EXPIRED' : 'CLOSED' }
         });
 
         if (claimed.count !== 1) {
           continue;
         }
 
-        await this.cancelPaymentByMethod(request);
+        const outcome = await releaseAuthorization(request);
+        await recordReleaseOutcome(request.id, outcome);
 
         console.log(`Expired request ${request.id} for song "${request.songTitle}"`);
       } catch (error) {
@@ -100,6 +140,11 @@ export class ExpirationService {
       try {
         // Same claim-first rule as above: the confirmation may have landed
         // between the read and the write.
+        //
+        // Unlike the path above, this one still writes paymentStatus up front.
+        // A draft by definition never reached AUTHORIZED - that transition is
+        // what turns it into a PENDING request - so there is no hold here for
+        // the reconciliation sweep to recover, and nothing to keep findable.
         const claimed = await prisma.request.updateMany({
           where: { id: request.id, status: 'AWAITING_PAYMENT' },
           data: { status: 'EXPIRED', paymentStatus: 'CANCELED' }
@@ -109,50 +154,50 @@ export class ExpirationService {
           continue;
         }
 
-        await this.cancelPaymentByMethod(request);
+        const outcome = await releaseAuthorization(request);
+        if (!outcome.released) {
+          console.warn(
+            `Could not release the hold on discarded draft ${request.id}: ${outcome.detail}`
+          );
+        }
       } catch (error) {
         console.error(`Failed to discard unpaid request ${request.id}:`, error);
       }
     }
   }
 
-  private async cancelPaymentByMethod(request: ExpirableRequest) {
-    if (!request.paymentIntentId) {
-      return;
-    }
+  /**
+   * Picks up requests that are finished but whose money is still on hold: a
+   * provider that was down when the event closed, or a request authorised in
+   * the seconds between an event close reading its list and flipping the rows.
+   *
+   * There is no claim here, which is a deliberate exception to the rule the rest
+   * of this codebase follows. That rule exists because capturing twice takes the
+   * money twice; releasing twice is a no-op now that releaseAuthorization is
+   * idempotent, and the write is still conditional on the row holding money. A
+   * claim would need an "in flight" state, which means a new enum value, which
+   * means a migration.
+   */
+  private async reconcileHolds() {
+    const now = Date.now();
 
-    switch (request.paymentMethod) {
-      case 'CARD':
-      case 'APPLE_PAY':
-      case 'GOOGLE_PAY':
-        await stripeService.cancelPaymentIntent(request.paymentIntentId);
-        console.log(`Cancelled Stripe payment ${request.paymentIntentId}`);
-        break;
+    const stranded = await prisma.request.findMany({
+      where: {
+        paymentStatus: 'AUTHORIZED',
+        // Terminal status, yet the money never came back.
+        status: { in: ['REJECTED', 'EXPIRED', 'CLOSED'] },
+        paymentIntentId: { not: null },
+        updatedAt: { lt: new Date(now - RECONCILE_GRACE_MS) },
+        createdAt: { gt: new Date(now - RECONCILE_MAX_AGE_MS) }
+      },
+      select: RELEASABLE_FIELDS
+    });
 
-      case 'PAYPAL':
-        await paypalService.voidOrder(request.paymentIntentId);
-        console.log(`Voided PayPal authorization for order ${request.paymentIntentId}`);
-        break;
+    if (stranded.length === 0) return;
 
-      case 'SATISPAY': {
-        const credentials = satispayCredentialsFor(request.dj);
-        if (!credentials) {
-          // The DJ disconnected Satispay while this payment was outstanding.
-          // The fund lock releases itself when it expires; there is nothing
-          // that can be done from here.
-          console.warn(
-            `Cannot release Satispay payment ${request.paymentIntentId}: the DJ has no credentials`
-          );
-          break;
-        }
-        await satispayService.cancelPayment(credentials, request.paymentIntentId);
-        console.log(`Cancelled Satispay payment ${request.paymentIntentId}`);
-        break;
-      }
+    console.log(`Reconciling ${stranded.length} authorisation(s) left on hold`);
 
-      default:
-        console.warn(`Unknown payment method: ${request.paymentMethod}`);
-    }
+    await releaseAll(stranded);
   }
 
   expiresAt(createdAt: Date): Date {

@@ -28,7 +28,10 @@ vi.mock('../src/services/paypal.service', () => ({
 }));
 
 vi.mock('../src/services/satispay.service', () => ({
-  satispayService: { cancelPayment: (...args: unknown[]) => cancelSatispay(...args) },
+  satispayService: {
+    cancelPayment: (...args: unknown[]) => cancelSatispay(...args),
+    getPayment: vi.fn()
+  },
   satispayCredentialsFor: (dj: any) =>
     dj?.satispayKeyId && dj?.satispayPrivateKey ? { keyId: dj.satispayKeyId, privateKey: 'k' } : null
 }));
@@ -42,6 +45,7 @@ const service = new ExpirationService() as any;
 const stale = {
   id: 'req-1',
   songTitle: 'Blue Monday',
+  status: 'PENDING',
   paymentMethod: 'CARD',
   paymentIntentId: 'pi_1',
   dj: { satispayKeyId: null, satispayPrivateKey: null }
@@ -63,13 +67,55 @@ describe('expiring pending requests', () => {
   // The claim and the status check are the same statement, so the DJ's accept
   // either happened before it (count 0) or after it (count 1). There is no
   // in-between in which both sides think they won.
-  it('claims the row by status rather than checking and then writing', async () => {
+  //
+  // paymentStatus is no longer part of the claim, and that is the whole point.
+  // It used to be written to CANCELED here, before any provider had been asked:
+  // if the cancel then failed, the row was terminal, the money was still on
+  // hold, and nothing could find it again because the crons search by status.
+  // It now stays AUTHORIZED until a provider confirms.
+  it('claims the row by status alone, leaving the money where it says it is', async () => {
     await service.expireOldRequests();
 
-    expect(updateMany).toHaveBeenCalledWith({
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
       where: { id: 'req-1', status: 'PENDING' },
-      data: { status: 'EXPIRED', paymentStatus: 'CANCELED' }
+      data: { status: 'EXPIRED' }
     });
+  });
+
+  // Written only after the provider answered, and conditionally: a capture that
+  // landed in between moved the row to CAPTURED and must not be overwritten.
+  it('records the cancellation only once the provider has confirmed it', async () => {
+    await service.expireOldRequests();
+
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: 'req-1', paymentStatus: { in: ['AUTHORIZED', 'PENDING'] } },
+      data: { paymentStatus: 'CANCELED' }
+    });
+  });
+
+  // The failure that used to strand the money. Leaving the row AUTHORIZED is
+  // what lets the reconciliation sweep pick it up five minutes later.
+  it('leaves the row holding money when the provider is down', async () => {
+    cancelPaymentIntent.mockRejectedValue(new Error('stripe down'));
+
+    await service.expireOldRequests();
+
+    expect(updateMany).toHaveBeenCalledOnce();
+  });
+
+  // An accepted song used to be excluded from expiry entirely, so a DJ who
+  // accepted a request and then went home left that card blocked until the
+  // provider gave up on its own. CLOSED matches what ending an event writes.
+  it('closes an accepted request the DJ never played', async () => {
+    findMany.mockResolvedValue([{ ...stale, status: 'ACCEPTED' }]);
+
+    await service.expireOldRequests();
+
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: 'req-1', status: 'ACCEPTED' },
+      data: { status: 'CLOSED' }
+    });
+    expect(cancelPaymentIntent).toHaveBeenCalledExactlyOnceWith('pi_1');
   });
 
   // This is the race: the DJ accepted between the read and the write, so the
@@ -84,11 +130,15 @@ describe('expiring pending requests', () => {
     expect(cancelSatispay).not.toHaveBeenCalled();
   });
 
-  it('only looks at requests older than the expiry window', async () => {
+  // Both open statuses now, and only rows whose money is actually on hold: a
+  // request whose capture failed is left for a human, because nobody knows
+  // whether the money moved and releasing it could give back a real donation.
+  it('only looks at open requests, older than the window, still holding money', async () => {
     await service.expireOldRequests();
 
     const where = findMany.mock.calls[0][0].where;
-    expect(where.status).toBe('PENDING');
+    expect(where.status).toEqual({ in: ['PENDING', 'ACCEPTED'] });
+    expect(where.paymentStatus).toBe('AUTHORIZED');
     const cutoff = where.createdAt.lt.getTime();
     expect(Date.now() - cutoff).toBeGreaterThanOrEqual(EXPIRATION_MS - 5_000);
     expect(Date.now() - cutoff).toBeLessThanOrEqual(EXPIRATION_MS + 5_000);
@@ -139,7 +189,16 @@ describe('expiring pending requests', () => {
     expect(cancelSatispay).not.toHaveBeenCalled();
     // The request is still expired: the guest must not keep waiting for a song
     // nobody is going to play.
-    expect(updateMany).toHaveBeenCalledOnce();
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: 'req-1', status: 'PENDING' },
+      data: { status: 'EXPIRED' }
+    });
+    // FAILED, not CANCELED. Nothing was cancelled - the lock is still there and
+    // no retry will ever reach it - and calling it CANCELED would hide it.
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: 'req-1', paymentStatus: { in: ['AUTHORIZED', 'PENDING'] } },
+      data: { paymentStatus: 'FAILED' }
+    });
   });
 });
 
@@ -169,7 +228,7 @@ describe('discarding drafts nobody paid for', () => {
     expect(cancelPaymentIntent).toHaveBeenCalledExactlyOnceWith('pi_1');
   });
 
-  // Drafts are dropped long before the three hour queue expiry: they are
+  // Drafts are dropped long before the twelve hour safety net: they are
   // invisible to the DJ, so the only thing they cost is a hold on a card.
   it('gives up on a draft sooner than on a request the DJ can see', async () => {
     await service.expireAbandonedDrafts();

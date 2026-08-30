@@ -43,7 +43,7 @@ vi.mock('../src/services/paypal.service', () => ({
 }));
 
 vi.mock('../src/services/satispay.service', () => ({
-  satispayService: {},
+  satispayService: { cancelPayment: vi.fn(), getPayment: vi.fn() },
   satispayCredentialsFor: () => null
 }));
 
@@ -105,6 +105,10 @@ beforeEach(() => {
   requestUpdate.mockResolvedValue({});
   queueAggregate.mockResolvedValue({ _max: { position: 3 } });
   transaction.mockResolvedValue([]);
+  // clearAllMocks forgets the calls but keeps the implementations, so a test
+  // that makes the provider fail would otherwise leak into the next one.
+  cancelPaymentIntent.mockResolvedValue({ id: 'pi_1', status: 'canceled' });
+  voidOrder.mockResolvedValue({ id: 'auth-1', status: 'VOIDED' });
 });
 
 describe('acceptRequest', () => {
@@ -204,5 +208,31 @@ describe('rejectRequest', () => {
 
     expect(cancelPaymentIntent).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  // The rejection is already written by the time the provider is called, so a
+  // provider outage used to hand the DJ a 500 for something that had in fact
+  // happened. The row stays AUTHORIZED and the reconciliation sweep retries it.
+  it('still tells the DJ the request is rejected when the provider is down', async () => {
+    cancelPaymentIntent.mockRejectedValue(new Error('stripe down'));
+
+    const { res, next } = await invoke(rejectRequest, 'dj-1');
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({ message: 'Request rejected' });
+    expect(emitRequestRejected).toHaveBeenCalledOnce();
+  });
+
+  // The write that follows the release is conditional, not a bare update: the
+  // song could have been played and paid for in between.
+  it('records the cancellation only over a row that still holds money', async () => {
+    await invoke(rejectRequest, 'dj-1');
+
+    expect(requestUpdate).not.toHaveBeenCalled();
+    expect(requestUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'req-1', paymentStatus: { in: ['AUTHORIZED', 'PENDING'] } },
+      data: { paymentStatus: 'CANCELED' }
+    });
   });
 });

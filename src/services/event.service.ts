@@ -1,6 +1,9 @@
-import { PrismaClient, EventStatus } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { EventStatus } from '@prisma/client';
+// The shared client, not a second `new PrismaClient()`. Two pools in one process
+// is the small problem; the large one is that a test mocking the shared module
+// never reached this service at all.
+import prisma from '../utils/database';
+import { closeOutstandingRequests, releaseInBackground } from './paymentRelease.service';
 
 interface GeocodingResult {
   lat: string;
@@ -321,6 +324,14 @@ export class EventService {
       throw new Error('Only active events can be ended');
     }
 
+    // Scoped by eventId and never by djId: a DJ can be running a second event,
+    // and ending this one must not close the requests of that one.
+    //
+    // Before the event row is flipped, so that a failure here leaves the event
+    // ACTIVE and the DJ able to try again, rather than ended with the guests'
+    // cards still blocked.
+    const holds = await closeOutstandingRequests({ eventId: id });
+
     const updated = await prisma.event.update({
       where: { id },
       data: {
@@ -328,6 +339,8 @@ export class EventService {
         endDateTime: new Date()
       }
     });
+
+    releaseInBackground(holds);
 
     return updated;
   }
@@ -347,10 +360,16 @@ export class EventService {
       throw new Error('Cannot cancel ended event');
     }
 
+    // A SCHEDULED event has no requests yet, so this is an innocuous no-op
+    // there; an ACTIVE one being called off owes its guests their money back.
+    const holds = await closeOutstandingRequests({ eventId: id });
+
     const updated = await prisma.event.update({
       where: { id },
       data: { status: 'CANCELLED' }
     });
+
+    releaseInBackground(holds);
 
     return updated;
   }
