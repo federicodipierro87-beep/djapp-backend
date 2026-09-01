@@ -1,7 +1,15 @@
 import { createServer, Server as HTTPServer } from 'http';
 import type { AddressInfo } from 'net';
 import { io as createClient, Socket as ClientSocket } from 'socket.io-client';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+
+// The handshake now reads passwordChangedAt, so the DJ row has to come from
+// somewhere. hoisted because vi.mock runs before the imports below.
+const db = vi.hoisted(() => ({ findUnique: vi.fn(async () => ({ passwordChangedAt: null })) }));
+
+vi.mock('../src/utils/database', () => ({
+  default: { dJ: { findUnique: (...args: unknown[]) => db.findUnique(...(args as [])) } }
+}));
 
 import { generateToken } from '../src/utils/jwt';
 import { emitNewRequest, emitToEvent, initializeSocket } from '../src/socket/socket';
@@ -47,6 +55,10 @@ beforeAll(async () => {
   url = `http://localhost:${(httpServer.address() as AddressInfo).port}`;
 });
 
+afterEach(() => {
+  db.findUnique.mockResolvedValue({ passwordChangedAt: null });
+});
+
 afterAll(async () => {
   clients.forEach((c) => c.disconnect());
   await new Promise<void>((resolve) => {
@@ -68,6 +80,16 @@ describe('socket authentication', () => {
     const jwt = await import('jsonwebtoken');
     const forged = jwt.default.sign({ djId: DJ_ID, email: 'a@b.c' }, 'wrong-secret');
     await expect(connect({ token: forged })).rejects.toThrow();
+  });
+
+  // A password reset closes the open sockets, so the browser that was thrown
+  // out immediately tries to reconnect with the token it still has.
+  it('rejects a token issued before the password was reset', async () => {
+    db.findUnique.mockResolvedValue({ passwordChangedAt: new Date(Date.now() + 60_000) });
+
+    await expect(
+      connect({ token: generateToken({ djId: DJ_ID, email: 'dj@example.com' }) })
+    ).rejects.toThrow();
   });
 });
 

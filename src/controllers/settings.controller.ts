@@ -6,6 +6,7 @@ import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { closeOutstandingRequests, releaseInBackground } from '../services/paymentRelease.service';
 import { asyncHandler } from '../utils/asyncHandler';
+import { generateToken } from '../utils/jwt';
 
 const updateSettingsSchema = z.object({
   name: z.string().trim().min(2).max(100).optional(),
@@ -372,10 +373,16 @@ export const changePassword = asyncHandler(async (req: AuthenticatedRequest, res
   // Update password
   await prisma.dJ.update({
     where: { id: req.dj!.djId },
-    data: { password: hashedNewPassword }
+    data: { password: hashedNewPassword, passwordChangedAt: new Date() }
   });
 
-  res.json({ message: 'Password aggiornata con successo' });
+  // passwordChangedAt has just invalidated every token issued before now,
+  // including the one this request arrived with. Without a replacement the DJ
+  // would be thrown out to the login page one request after being told the
+  // change worked.
+  const token = generateToken({ djId: dj.id, email: dj.email, ...(dj.isAdmin && { isAdmin: true }) });
+
+  res.json({ message: 'Password aggiornata con successo', token });
 });
 
 export const generateQRCode = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

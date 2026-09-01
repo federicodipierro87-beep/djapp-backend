@@ -43,6 +43,14 @@ model DJ {
   minDonation      Decimal        @default(5.00)
   status           DJStatus       @default(PENDING)
   isAdmin          Boolean        @default(false)
+  // The SHA-256 of the reset token, never the token itself: the clear text only
+  // ever exists inside the link in the email. Unique because a token identifies
+  // exactly one DJ, and that is how the reset looks them up.
+  passwordResetTokenHash String?   @unique
+  passwordResetExpiresAt DateTime?
+  // Every JWT issued before this instant is refused. Without it a password
+  // reset would leave whoever stole the old password logged in for seven days.
+  passwordChangedAt      DateTime?
   requests         Request[]
   queue            QueueItem[]
   events           Event[]

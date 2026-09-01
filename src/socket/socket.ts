@@ -2,6 +2,8 @@ import { Server as HTTPServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { SOCKET_EVENTS } from './events';
 import { verifyToken } from '../utils/jwt';
+import { isTokenStale } from '../utils/passwordReset';
+import prisma from '../utils/database';
 
 let io: Server | null = null;
 
@@ -20,12 +22,26 @@ export function initializeSocket(httpServer: HTTPServer, allowedOrigins: string[
   // Guests reach an event by scanning a QR code, so they must be able to connect
   // without credentials. A token is therefore optional, but if one is supplied it
   // has to be valid: that is what grants access to the DJ's private room.
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) return next();
 
     try {
-      socket.data.djId = verifyToken(String(token)).djId;
+      const payload = verifyToken(String(token));
+
+      // Same check as the HTTP middleware, for the same reason: a token issued
+      // before the last password change belongs to a session that the change
+      // was meant to end, and the DJ's room carries the donation amounts.
+      const dj = await prisma.dJ.findUnique({
+        where: { id: payload.djId },
+        select: { passwordChangedAt: true }
+      });
+
+      if (!dj || isTokenStale(dj.passwordChangedAt, payload.iat)) {
+        return next(new Error('Invalid or expired token'));
+      }
+
+      socket.data.djId = payload.djId;
       next();
     } catch {
       next(new Error('Invalid or expired token'));
@@ -72,6 +88,16 @@ export function getIO(): Server {
     throw new Error('Socket.io not initialized. Call initializeSocket first.');
   }
   return io;
+}
+
+// The handshake is the only moment a socket is authenticated, so a connection
+// opened before a password reset keeps receiving the DJ's private requests for
+// as long as it stays up. Resetting the password closes those connections; the
+// client reconnects and is turned away by the check above.
+export function disconnectDJSockets(djId: string): void {
+  // A reset must not fail because the realtime layer is not up.
+  if (!io) return;
+  io.in(djRoom(djId)).disconnectSockets(true);
 }
 
 // Emit to all clients in an event room

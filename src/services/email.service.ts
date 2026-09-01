@@ -318,4 +318,172 @@ export class EmailService {
       return false;
     }
   }
+
+  // Same look as the approval email on purpose: both arrive from the same
+  // sender, and a reset link that looks like a different app is a reset link
+  // nobody clicks.
+  static async sendPasswordResetEmail(
+    djEmail: string,
+    djName: string,
+    resetUrl: string
+  ): Promise<boolean> {
+    try {
+      const emailTemplate: EmailTemplate = {
+        to: djEmail,
+        subject: '🔑 Reimposta la password di DJ Request App',
+        html: `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>DJ Request App - Reimposta la password</title>
+              <style>
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+                  line-height: 1.6;
+                  color: #333;
+                  background-color: #f8f9fa;
+                  margin: 0;
+                  padding: 0;
+                }
+                .container {
+                  max-width: 600px;
+                  margin: 0 auto;
+                  background: white;
+                  border-radius: 12px;
+                  overflow: hidden;
+                  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                }
+                .header {
+                  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                  color: white;
+                  padding: 40px 30px;
+                  text-align: center;
+                }
+                .header h1 {
+                  margin: 0;
+                  font-size: 28px;
+                  font-weight: 700;
+                  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                }
+                .content {
+                  padding: 40px 30px;
+                }
+                .content h2 {
+                  color: #10b981;
+                  margin-top: 0;
+                  font-size: 24px;
+                  font-weight: 600;
+                }
+                .content p {
+                  margin-bottom: 20px;
+                  font-size: 16px;
+                  line-height: 1.6;
+                }
+                .cta-button {
+                  display: inline-block;
+                  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                  color: white;
+                  padding: 15px 30px;
+                  text-decoration: none;
+                  border-radius: 8px;
+                  font-weight: 600;
+                  font-size: 16px;
+                  margin: 20px 0;
+                  box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);
+                }
+                .info-box {
+                  background: #f0fdf4;
+                  border: 2px solid #bbf7d0;
+                  border-radius: 8px;
+                  padding: 20px;
+                  margin: 25px 0;
+                }
+                .info-box h3 {
+                  color: #059669;
+                  margin-top: 0;
+                  font-size: 18px;
+                }
+                .link-fallback {
+                  word-break: break-all;
+                  font-size: 13px;
+                  color: #6b7280;
+                }
+                .footer {
+                  background: #f8f9fa;
+                  padding: 30px;
+                  text-align: center;
+                  color: #6b7280;
+                  font-size: 14px;
+                  border-top: 1px solid #e5e7eb;
+                }
+                .alien-icon {
+                  font-size: 48px;
+                  margin-bottom: 10px;
+                  display: block;
+                }
+                @media (max-width: 600px) {
+                  .container { margin: 20px; }
+                  .header, .content { padding: 30px 20px; }
+                  .cta-button { display: block; text-align: center; }
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <span class="alien-icon">👽🔑</span>
+                  <h1>DJ Request App</h1>
+                </div>
+                <div class="content">
+                  <h2>Ciao ${djName},</h2>
+                  <p>Abbiamo ricevuto una richiesta di reimpostazione della password per il tuo account.</p>
+
+                  <p>Fai clic sul pulsante qui sotto per sceglierne una nuova:</p>
+
+                  <a href="${resetUrl}" class="cta-button">
+                    🔑 Reimposta la password
+                  </a>
+
+                  <div class="info-box">
+                    <h3>⏱️ Il link vale un'ora</h3>
+                    <p>Dopo può essere usato una sola volta. Se scade, richiedine un altro dalla pagina di accesso.</p>
+                  </div>
+
+                  <p>Se non hai richiesto tu il cambio password, ignora questa email: la tua password resta quella di sempre.</p>
+
+                  <p>Se il pulsante non funziona, copia questo indirizzo nel browser:</p>
+                  <p class="link-fallback">${resetUrl}</p>
+                </div>
+                <div class="footer">
+                  <p>🎵 DJ Request App - La piattaforma per DJ e fan della musica</p>
+                  <p>Questa è una email automatica, non rispondere a questo messaggio.</p>
+                  <p>Per supporto, contattaci attraverso l'app.</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `
+      };
+
+      const { error } = await resend.emails.send({
+        from: FROM_EMAIL,
+        to: emailTemplate.to,
+        subject: emailTemplate.subject,
+        html: emailTemplate.html,
+      });
+
+      if (error) {
+        console.error('Error sending password reset email:', error);
+        return false;
+      }
+
+      console.log(`Password reset email sent successfully to ${djEmail}`);
+      return true;
+    } catch (error) {
+      console.error('Error in sendPasswordResetEmail:', error);
+      return false;
+    }
+  }
 }

@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwt';
+import { isTokenStale } from '../utils/passwordReset';
+import prisma from '../utils/database';
 
 export interface AuthenticatedRequest extends Request {
   dj?: {
@@ -8,7 +10,7 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
-export const authMiddleware = (
+export const authMiddleware = async (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
@@ -23,6 +25,19 @@ export const authMiddleware = (
 
   try {
     const payload = verifyToken(token);
+
+    // A JWT lasts seven days and cannot be withdrawn, so a valid signature is
+    // not enough: a password reset has to be able to end the sessions that were
+    // open when it happened, which is the whole point of resetting it.
+    const dj = await prisma.dJ.findUnique({
+      where: { id: payload.djId },
+      select: { passwordChangedAt: true }
+    });
+
+    if (!dj || isTokenStale(dj.passwordChangedAt, payload.iat)) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
     req.dj = payload;
     next();
   } catch (error) {
