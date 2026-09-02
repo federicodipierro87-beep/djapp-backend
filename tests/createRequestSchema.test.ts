@@ -37,8 +37,10 @@ describe('createRequestSchema', () => {
     expect(parsed).not.toHaveProperty('eventId');
   });
 
-  it('rejects a donation below the smallest chargeable amount', () => {
-    expect(() => createRequestSchema.parse({ ...valid, donationAmount: 0 })).toThrow();
+  // Zero is now a request the DJ may have opened the night to; below zero is
+  // not an amount at all. See freeRequest.test.ts for the free path.
+  it('rejects a negative donation', () => {
+    expect(() => createRequestSchema.parse({ ...valid, donationAmount: -1 })).toThrow();
   });
 
   it('rejects a donation above the cap', () => {

@@ -306,53 +306,61 @@ export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: 
   }
 
   const request = queueItem.request;
+
+  // A free request has nothing to capture, and no payment status to rewrite:
+  // CAPTURED on it would claim zero euros were collected, and every path that
+  // reads that column would then read the row as a settled payment.
+  const isFree = request.paymentStatus === 'NOT_REQUIRED';
+
   let captureResult;
   let captureError: string | null = null;
 
-  // Cattura il pagamento ora che la canzone viene effettivamente suonata
-  try {
-    switch (request.paymentMethod) {
-      case 'CARD':
-      case 'APPLE_PAY':
-      case 'GOOGLE_PAY':
-        if (request.paymentIntentId) {
-          captureResult = await stripeService.capturePaymentIntent(request.paymentIntentId);
-        }
-        break;
+  if (!isFree) {
+    // Cattura il pagamento ora che la canzone viene effettivamente suonata
+    try {
+      switch (request.paymentMethod) {
+        case 'CARD':
+        case 'APPLE_PAY':
+        case 'GOOGLE_PAY':
+          if (request.paymentIntentId) {
+            captureResult = await stripeService.capturePaymentIntent(request.paymentIntentId);
+          }
+          break;
 
-      case 'PAYPAL':
-        if (request.paymentIntentId) {
-          captureResult = await paypalService.captureOrder(request.paymentIntentId);
-        }
-        break;
+        case 'PAYPAL':
+          if (request.paymentIntentId) {
+            captureResult = await paypalService.captureOrder(request.paymentIntentId);
+          }
+          break;
 
-      case 'SATISPAY': {
-        const credentials = satispayCredentialsFor(queueItem.dj);
-        if (request.paymentIntentId && credentials) {
-          // Satispay needs telling how much of the hold to take. It is the
-          // whole donation, but leaving it out is a 400 rather than a default.
-          captureResult = await satispayService.acceptPayment(
-            credentials,
-            request.paymentIntentId,
-            toCents(request.donationAmount.toNumber())
-          );
+        case 'SATISPAY': {
+          const credentials = satispayCredentialsFor(queueItem.dj);
+          if (request.paymentIntentId && credentials) {
+            // Satispay needs telling how much of the hold to take. It is the
+            // whole donation, but leaving it out is a 400 rather than a default.
+            captureResult = await satispayService.acceptPayment(
+              credentials,
+              request.paymentIntentId,
+              toCents(request.donationAmount.toNumber())
+            );
+          }
+          break;
         }
-        break;
       }
+    } catch (error) {
+      // The song really was played, so the queue state stays PLAYED. Surface the
+      // failure instead of letting an uncollected donation disappear silently.
+      console.error(`Payment capture failed for request ${request.id}:`, error);
+      captureError = error instanceof Error ? error.message : 'Payment capture failed';
     }
-  } catch (error) {
-    // The song really was played, so the queue state stays PLAYED. Surface the
-    // failure instead of letting an uncollected donation disappear silently.
-    console.error(`Payment capture failed for request ${request.id}:`, error);
-    captureError = error instanceof Error ? error.message : 'Payment capture failed';
-  }
 
-  await prisma.request.update({
-    where: { id: request.id },
-    data: captureError
-      ? { paymentStatus: 'FAILED' }
-      : { paymentStatus: 'CAPTURED', capturedAt: new Date() }
-  });
+    await prisma.request.update({
+      where: { id: request.id },
+      data: captureError
+        ? { paymentStatus: 'FAILED' }
+        : { paymentStatus: 'CAPTURED', capturedAt: new Date() }
+    });
+  }
 
   const code = broadcastCode(queueItem);
   if (code) {
@@ -360,9 +368,11 @@ export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: 
   }
 
   res.json({
-    message: captureError
-      ? 'Song marked as played but the payment could not be captured'
-      : 'Song marked as played and payment captured',
+    message: isFree
+      ? 'Song marked as played'
+      : captureError
+        ? 'Song marked as played but the payment could not be captured'
+        : 'Song marked as played and payment captured',
     captureResult,
     captureError
   });

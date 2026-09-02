@@ -18,6 +18,8 @@ interface CreateEventData {
   address: string;
   dateTime: Date;
   endDateTime?: Date | null;
+  /** Undefined leaves the column null, which reads as "inherit from the DJ". */
+  minDonation?: number;
 }
 
 interface UpdateEventData {
@@ -27,7 +29,13 @@ interface UpdateEventData {
   dateTime?: Date;
   /** null clears the stored end date; undefined leaves it untouched. */
   endDateTime?: Date | null;
+  minDonation?: number;
 }
+
+// Money, so two decimals. A slider that hands back 5.000000000000001 must not
+// become a minimum no round donation can ever match.
+const toMoney = (value: number | undefined) =>
+  value === undefined ? undefined : Math.round(value * 100) / 100;
 
 function generateEventCode(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -138,6 +146,7 @@ export class EventService {
         longitude,
         dateTime: data.dateTime,
         endDateTime: data.endDateTime,
+        minDonation: toMoney(data.minDonation),
         status: 'SCHEDULED'
       },
       include: {
@@ -263,7 +272,7 @@ export class EventService {
       throw new Error('Cannot update ended or cancelled event');
     }
 
-    let updateData: any = { ...data };
+    let updateData: any = { ...data, minDonation: toMoney(data.minDonation) };
 
     if (data.address && data.address !== event.address) {
       const { latitude, longitude, city } = await this.geocodeAddress(data.address);

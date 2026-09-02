@@ -162,9 +162,11 @@ async function releaseSatispay(request: ReleasableRequest, paymentId: string): P
  * already taken" need opposite handling.
  */
 export async function releaseAuthorization(request: ReleasableRequest): Promise<ReleaseOutcome> {
-  if (!request.paymentIntentId) {
-    // No authorisation was ever attached, so there is nothing on hold. Counting
-    // it as a success is what lets the row reach a terminal payment state.
+  if (!request.paymentIntentId || !request.paymentMethod) {
+    // No authorisation was ever attached, so there is nothing on hold - either
+    // the guest abandoned the payment, or the request was free and never had a
+    // method at all. Counting it as a success is what lets the row reach a
+    // terminal payment state.
     return { released: true, reason: 'nothing_to_release' };
   }
 

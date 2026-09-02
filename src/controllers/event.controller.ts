@@ -56,12 +56,20 @@ const clearableInstant = z
     return value ? toInstant(value, ctx) : null;
   });
 
+/**
+ * The minimum tip for this night. Zero is allowed and means the guests may ask
+ * for free; absent means the DJ did not touch the field, so the event keeps
+ * whatever it had - their profile default on a new one.
+ */
+const eventMinDonation = z.number().min(0).max(100).optional();
+
 export const createEventSchema = z.object({
   name: z.string().trim().min(1, 'Event name is required').max(120),
   description: z.string().trim().max(1000).optional(),
   address: z.string().trim().min(1, 'Address is required').max(250),
   dateTime: z.string().transform(toInstant),
-  endDateTime: clearableInstant
+  endDateTime: clearableInstant,
+  minDonation: eventMinDonation
 });
 
 export const updateEventSchema = z.object({
@@ -69,7 +77,8 @@ export const updateEventSchema = z.object({
   description: z.string().trim().max(1000).optional(),
   address: z.string().trim().min(1).max(250).optional(),
   dateTime: optionalInstant,
-  endDateTime: clearableInstant
+  endDateTime: clearableInstant,
+  minDonation: eventMinDonation
 });
 
 const nearbyQuerySchema = z.object({
@@ -90,7 +99,8 @@ export const createEvent = asyncHandler(async (req: AuthenticatedRequest, res: R
       description: data.description,
       address: data.address,
       dateTime: data.dateTime,
-      endDateTime: data.endDateTime
+      endDateTime: data.endDateTime,
+      minDonation: data.minDonation
     });
 
     res.status(201).json(event);
@@ -156,7 +166,9 @@ export const getPublicEventInfo = asyncHandler(async (req: Request, res: Respons
       eventCode: event.eventCode,
       eventName: event.name,
       djName: event.dj.name,
-      minDonation: event.dj.minDonation.toNumber(),
+      // The event's own minimum, and only the DJ's when the event has none:
+      // every event created before that column existed, and no other case.
+      minDonation: (event.minDonation ?? event.dj.minDonation).toNumber(),
       paymentMethods: availableMethods(event.dj),
       isAcceptingRequests: event.status === 'ACTIVE'
     });

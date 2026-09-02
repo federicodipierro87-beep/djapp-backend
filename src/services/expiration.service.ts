@@ -75,10 +75,15 @@ export class ExpirationService {
         // then went home left the guest's card blocked until the provider gave
         // up on its own.
         status: { in: ['PENDING', 'ACCEPTED'] },
-        // Only rows where money is genuinely on hold. A request whose capture
-        // failed is deliberately excluded: nobody knows whether the money moved,
-        // and a blind release could hand back a donation already collected.
-        paymentStatus: 'AUTHORIZED',
+        // Rows where money is genuinely on hold, plus the free ones, which have
+        // no hold at all but still have to stop piling up in the DJ's panel. A
+        // request whose capture failed is deliberately excluded: nobody knows
+        // whether the money moved, and a blind release could hand back a
+        // donation already collected.
+        //
+        // The release below is a no-op on a free row - no intent, no method - so
+        // it reaches EXPIRED with its payment status left as it was.
+        paymentStatus: { in: ['AUTHORIZED', 'NOT_REQUIRED'] },
         // createdAt, not authorizedAt. authorizedAt is nullable and is null on
         // every row written before the invert_payment_flow migration, and in SQL
         // `NULL < cutoff` is UNKNOWN - those rows would never expire, silently,

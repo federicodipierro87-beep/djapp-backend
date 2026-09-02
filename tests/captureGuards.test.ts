@@ -65,6 +65,7 @@ const queueItem = {
     id: 'req-1',
     paymentMethod: 'CARD',
     paymentIntentId: 'pi_1',
+    paymentStatus: 'AUTHORIZED',
     donationAmount: new Prisma.Decimal(10)
   },
   dj: { eventCode: 'ABC123', satispayKeyId: null, satispayPrivateKey: null },
@@ -174,6 +175,30 @@ describe('markAsPlayed', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ captureError: 'card declined' })
     );
+  });
+
+  // A free request has nothing to capture. Writing CAPTURED on it would claim
+  // zero euros were collected, and the row would stop reading as free to every
+  // path that goes by paymentStatus.
+  it('leaves a free request alone instead of capturing nothing', async () => {
+    queueFindUnique.mockResolvedValue({
+      ...queueItem,
+      request: {
+        ...queueItem.request,
+        paymentMethod: null,
+        paymentIntentId: null,
+        paymentStatus: 'NOT_REQUIRED',
+        donationAmount: new Prisma.Decimal(0)
+      }
+    });
+
+    const { res } = await invoke(markAsPlayed, 'dj-1');
+
+    expect(capturePaymentIntent).not.toHaveBeenCalled();
+    expect(requestUpdate).not.toHaveBeenCalled();
+    // The song is still played: only the money side is skipped.
+    expect(queueUpdateMany).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
   });
 
   it('captures a PayPal order through PayPal, not Stripe', async () => {

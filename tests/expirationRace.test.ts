@@ -130,15 +130,17 @@ describe('expiring pending requests', () => {
     expect(cancelSatispay).not.toHaveBeenCalled();
   });
 
-  // Both open statuses now, and only rows whose money is actually on hold: a
-  // request whose capture failed is left for a human, because nobody knows
-  // whether the money moved and releasing it could give back a real donation.
-  it('only looks at open requests, older than the window, still holding money', async () => {
+  // Both open statuses now, and only rows whose money is actually on hold or
+  // that never had any: a request whose capture failed is left for a human,
+  // because nobody knows whether the money moved and releasing it could give
+  // back a real donation. A free one has no hold to give back but would
+  // otherwise sit in the DJ's panel forever.
+  it('only looks at open requests, older than the window, with nothing left owing', async () => {
     await service.expireOldRequests();
 
     const where = findMany.mock.calls[0][0].where;
     expect(where.status).toEqual({ in: ['PENDING', 'ACCEPTED'] });
-    expect(where.paymentStatus).toBe('AUTHORIZED');
+    expect(where.paymentStatus).toEqual({ in: ['AUTHORIZED', 'NOT_REQUIRED'] });
     const cutoff = where.createdAt.lt.getTime();
     expect(Date.now() - cutoff).toBeGreaterThanOrEqual(EXPIRATION_MS - 5_000);
     expect(Date.now() - cutoff).toBeLessThanOrEqual(EXPIRATION_MS + 5_000);

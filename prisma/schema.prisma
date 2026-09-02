@@ -71,7 +71,9 @@ model Request {
   requesterName   String
   requesterEmail  String?
   donationAmount  Decimal
-  paymentMethod   PaymentMethod
+  // Null on a free request: there is no money to move, so naming a provider's
+  // method would be a lie the release and capture paths would act on.
+  paymentMethod   PaymentMethod?
   paymentProvider PaymentProvider?
   // Unique because an authorisation pays for exactly one request. Without this
   // the same authorised payment could be spent on several songs.
@@ -148,6 +150,11 @@ enum PaymentStatus {
   CAPTURED
   CANCELED
   FAILED
+  // Nobody is owed anything: the request was free. Distinct from PENDING, which
+  // means a payment is expected and has not arrived - the three paths that move
+  // real money all select on this column, and neither of them must see this row.
+  // Listed last because Postgres enum values are appended.
+  NOT_REQUIRED
 }
 
 enum QueueStatus {
@@ -229,6 +236,11 @@ model Event {
   longitude   Float
   dateTime    DateTime
   endDateTime DateTime?
+  // The minimum tip for this night. Null means the DJ never set one for this
+  // event, so their profile default applies - which is what every event created
+  // before this column existed has to keep doing. Zero is a decision, not an
+  // absence: it opens the night to free requests.
+  minDonation Decimal?
   status      EventStatus @default(SCHEDULED)
   requests    Request[]
   queueItems  QueueItem[]

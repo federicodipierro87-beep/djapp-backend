@@ -34,9 +34,16 @@ export const createRequestSchema = z.object({
   requesterName: z.string().trim().min(1).max(60),
   requesterEmail: z.string().trim().email().max(254).optional(),
   // The cap is enforced here too: the browser check can be bypassed and this
-  // amount is what gets authorised on the payment provider.
-  donationAmount: z.number().min(0.01).max(1000),
-  paymentMethod: z.enum(['CARD', 'APPLE_PAY', 'GOOGLE_PAY', 'PAYPAL', 'SATISPAY'])
+  // amount is what gets authorised on the payment provider. Zero is allowed by
+  // the schema and refused further down unless the event's minimum is zero too.
+  donationAmount: z.number().min(0).max(1000),
+  // Only needed when there is something to charge. Sent anyway alongside a zero
+  // by every tab loaded before this deploy, so it is ignored rather than
+  // refused: a 400 there would break pages nobody can reload for them.
+  paymentMethod: z.enum(['CARD', 'APPLE_PAY', 'GOOGLE_PAY', 'PAYPAL', 'SATISPAY']).optional()
+}).refine((data) => data.donationAmount === 0 || data.paymentMethod !== undefined, {
+  message: 'A payment method is required for a donation',
+  path: ['paymentMethod']
 });
 
 // The panel polls this endpoint every few seconds and used to be handed the
@@ -66,7 +73,9 @@ async function resolveEventCode(eventCode: string) {
       // Never taken from the body: a guest who knows one event code could
       // otherwise file the request against another DJ's night.
       eventId: event.id as string | null,
-      minDonation: event.dj.minDonation.toNumber(),
+      // The night's own minimum. It falls back to the DJ's only when the event
+      // has none, which is every event created before that column existed.
+      minDonation: (event.minDonation ?? event.dj.minDonation).toNumber(),
       isActive: event.status === 'ACTIVE',
       ...payoutDestination(event.dj)
     };
@@ -127,7 +136,12 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
   const legacyPaymentIntentId =
     typeof req.body?.paymentIntentId === 'string' ? req.body.paymentIntentId : undefined;
 
-  if (!isPaymentMethodEnabled(data.paymentMethod)) {
+  // Nothing to charge means nothing to charge it to. A method sent alongside a
+  // zero is dropped rather than refused: tabs loaded before this deploy always
+  // send one, and rejecting them would break pages nobody can reload for them.
+  const paymentMethod = data.donationAmount > 0 ? data.paymentMethod : undefined;
+
+  if (paymentMethod && !isPaymentMethodEnabled(paymentMethod)) {
     return res.status(400).json({ error: 'This payment method is not available' });
   }
 
@@ -141,6 +155,8 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
     return res.status(400).json({ error: 'Event is not active' });
   }
 
+  // The only gate on a free request: a zero passes here exactly when the DJ set
+  // this event's minimum to zero. No second permission is needed.
   if (data.donationAmount < target.minDonation) {
     return res.status(400).json({
       error: `Minimum donation is €${target.minDonation}`,
@@ -148,7 +164,11 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
     });
   }
 
-  const provider = providerFor(data.paymentMethod);
+  if (!paymentMethod) {
+    return createFreeRequest(res, data, target);
+  }
+
+  const provider = providerFor(paymentMethod);
 
   // With Connect on, this donation is settled into the DJ's own account, so
   // there has to be one and Stripe has to have cleared it. Saying so plainly
@@ -177,7 +197,7 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
     requesterName: data.requesterName,
     requesterEmail: data.requesterEmail,
     donationAmount: data.donationAmount,
-    paymentMethod: data.paymentMethod,
+    paymentMethod,
     paymentProvider: provider,
     djId: target.djId,
     eventId: target.eventId
@@ -231,6 +251,60 @@ export const createRequest = asyncHandler(async (req: Request, res: Response) =>
     createdAt: request.createdAt
   });
 });
+
+/**
+ * No provider, no authorisation, no waiting: the request goes straight in front
+ * of the DJ.
+ *
+ * The payment columns say so plainly. NOT_REQUIRED rather than the PENDING
+ * default, because PENDING means "a payment is expected and has not arrived" -
+ * and the three paths that touch real money (the twelve-hour expiry, the hold
+ * reconciliation, closing a night) all find their rows by paymentStatus. A free
+ * request has to be invisible to them by construction, not by luck.
+ */
+async function createFreeRequest(
+  res: Response,
+  data: z.infer<typeof createRequestSchema>,
+  target: { djId: string; eventId: string | null }
+) {
+  const request = await prisma.request.create({
+    data: {
+      songTitle: data.songTitle,
+      artistName: data.artistName,
+      spotifyTrackId: data.spotifyTrackId,
+      albumCover: data.albumCover,
+      requesterName: data.requesterName,
+      requesterEmail: data.requesterEmail,
+      donationAmount: 0,
+      paymentMethod: null,
+      paymentProvider: null,
+      paymentIntentId: null,
+      djId: target.djId,
+      eventId: target.eventId,
+      status: 'PENDING',
+      paymentStatus: 'NOT_REQUIRED'
+    }
+  });
+
+  emitNewRequest(request.djId, {
+    id: request.id,
+    songTitle: request.songTitle,
+    artistName: request.artistName,
+    albumCover: request.albumCover,
+    requesterName: request.requesterName,
+    donationAmount: request.donationAmount,
+    status: request.status,
+    createdAt: request.createdAt
+  });
+
+  return res.status(201).json({
+    requestId: request.id,
+    status: 'PENDING',
+    payment: null,
+    expiresAt: expirationService.expiresAt(request.createdAt),
+    createdAt: request.createdAt
+  });
+}
 
 // Transition shim, see createRequest. Verifies with Stripe that the id names a
 // real, authorised, correctly priced hold before adopting it.

@@ -70,3 +70,37 @@ describe('clearing the end date', () => {
     expect(updateEventSchema.parse({ dateTime: '' }).dateTime).toBeUndefined();
   });
 });
+
+describe('the minimum tip of a night', () => {
+  // Zero is the whole feature: it is what opens the night to free requests, so
+  // it has to survive validation rather than read as an empty field.
+  it('accepts zero, which is what makes the tip optional for the guests', () => {
+    expect(
+      createEventSchema.parse({ ...base, dateTime: SAME_MOMENT_UTC, minDonation: 0 }).minDonation
+    ).toBe(0);
+  });
+
+  it('accepts a real minimum', () => {
+    expect(updateEventSchema.parse({ minDonation: 5 }).minDonation).toBe(5);
+  });
+
+  it('refuses a negative minimum', () => {
+    expect(() =>
+      createEventSchema.parse({ ...base, dateTime: SAME_MOMENT_UTC, minDonation: -1 })
+    ).toThrow();
+    expect(() => updateEventSchema.parse({ minDonation: -1 })).toThrow();
+  });
+
+  it('refuses a minimum above the top of the slider', () => {
+    expect(() => updateEventSchema.parse({ minDonation: 101 })).toThrow();
+  });
+
+  // Prisma skips undefined, so an untouched field leaves the stored minimum -
+  // or the absence of one, which is what makes an old event keep using the DJ's.
+  it('leaves the stored minimum alone when the field is not sent', () => {
+    expect(updateEventSchema.parse({ name: 'Altro nome' }).minDonation).toBeUndefined();
+    expect(
+      createEventSchema.parse({ ...base, dateTime: SAME_MOMENT_UTC }).minDonation
+    ).toBeUndefined();
+  });
+});
