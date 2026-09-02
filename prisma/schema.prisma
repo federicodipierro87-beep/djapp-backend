@@ -40,6 +40,12 @@ model DJ {
   satispayKeyId      String?
   satispayPrivateKey String?
   eventCode        String         @unique
+  // The legacy per-DJ code has no Event row behind it, so this is the only
+  // thing that can close it. Without it the code was open forever: ending the
+  // night released the holds and wrote a summary, and then the same QR poster
+  // went on taking payments. Ending a night turns it off, starting one turns it
+  // back on.
+  eventCodeActive  Boolean        @default(true)
   minDonation      Decimal        @default(5.00)
   status           DJStatus       @default(PENDING)
   isAdmin          Boolean        @default(false)
@@ -238,8 +244,9 @@ model Event {
   endDateTime DateTime?
   // The minimum tip for this night. Null means the DJ never set one for this
   // event, so their profile default applies - which is what every event created
-  // before this column existed has to keep doing. Zero is a decision, not an
-  // absence: it opens the night to free requests.
+  // before this column existed has to keep doing. Never below MIN_DONATION: the
+  // card providers refuse anything smaller, and it is read back through
+  // floorMinDonation so an older row cannot quote an amount that would fail.
   minDonation Decimal?
   status      EventStatus @default(SCHEDULED)
   requests    Request[]

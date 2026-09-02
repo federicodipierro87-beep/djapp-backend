@@ -4,8 +4,9 @@ import { PaymentMethod } from '@prisma/client';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { eventService } from '../services/event.service';
 import { canReceiveSatispay } from './satispay.controller';
-import { enabledPaymentMethods } from '../config/payments';
+import { MIN_DONATION, enabledPaymentMethods } from '../config/payments';
 import { asyncHandler } from '../utils/asyncHandler';
+import { DJ_AVAILABILITY_SELECT, canServeRequests } from '../utils/djAvailability';
 import prisma from '../utils/database';
 
 const HAS_UTC_OFFSET = /([Zz]|[+-]\d{2}:?\d{2})$/;
@@ -57,11 +58,11 @@ const clearableInstant = z
   });
 
 /**
- * The minimum tip for this night. Zero is allowed and means the guests may ask
- * for free; absent means the DJ did not touch the field, so the event keeps
- * whatever it had - their profile default on a new one.
+ * The minimum tip for this night. Absent means the DJ did not touch the field,
+ * so the event keeps whatever it had - their profile default on a new one. The
+ * floor is the card providers': see MIN_DONATION.
  */
-const eventMinDonation = z.number().min(0).max(100).optional();
+const eventMinDonation = z.number().min(MIN_DONATION).max(100).optional();
 
 export const createEventSchema = z.object({
   name: z.string().trim().min(1, 'Event name is required').max(120),
@@ -168,9 +169,14 @@ export const getPublicEventInfo = asyncHandler(async (req: Request, res: Respons
       djName: event.dj.name,
       // The event's own minimum, and only the DJ's when the event has none:
       // every event created before that column existed, and no other case.
-      minDonation: (event.minDonation ?? event.dj.minDonation).toNumber(),
+      // Floored, because rows written before the floor existed can be lower and
+      // the guest must not be quoted an amount their card would refuse.
+      minDonation: Math.max(MIN_DONATION, (event.minDonation ?? event.dj.minDonation).toNumber()),
       paymentMethods: availableMethods(event.dj),
-      isAcceptingRequests: event.status === 'ACTIVE'
+      // The same verdict createRequest reaches. Saying it here is what stops a
+      // guest filling in the form and paying for a request the DJ's own panel
+      // would refuse to show them.
+      isAcceptingRequests: event.status === 'ACTIVE' && canServeRequests(event.dj)
     });
   }
 
@@ -179,9 +185,11 @@ export const getPublicEventInfo = asyncHandler(async (req: Request, res: Respons
     select: {
       name: true,
       eventCode: true,
+      eventCodeActive: true,
       minDonation: true,
       satispayKeyId: true,
-      satispayPrivateKey: true
+      satispayPrivateKey: true,
+      ...DJ_AVAILABILITY_SELECT
     }
   });
 
@@ -193,9 +201,9 @@ export const getPublicEventInfo = asyncHandler(async (req: Request, res: Respons
     eventCode: dj.eventCode,
     eventName: null,
     djName: dj.name,
-    minDonation: dj.minDonation.toNumber(),
+    minDonation: Math.max(MIN_DONATION, dj.minDonation.toNumber()),
     paymentMethods: availableMethods(dj),
-    isAcceptingRequests: true
+    isAcceptingRequests: dj.eventCodeActive && canServeRequests(dj)
   });
 });
 

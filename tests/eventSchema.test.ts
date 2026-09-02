@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEventSchema, updateEventSchema } from '../src/controllers/event.controller';
+import { MIN_DONATION } from '../src/config/payments';
 
 const base = { name: 'Serata', address: 'Via Roma 1, Milano' };
 
@@ -72,16 +73,32 @@ describe('clearing the end date', () => {
 });
 
 describe('the minimum tip of a night', () => {
-  // Zero is the whole feature: it is what opens the night to free requests, so
-  // it has to survive validation rather than read as an empty field.
-  it('accepts zero, which is what makes the tip optional for the guests', () => {
+  // The floor belongs to the card providers, not to us: Stripe refuses a euro
+  // charge under fifty cents when the PaymentIntent is created, so a night
+  // advertising less would quote its guests an amount no card would accept.
+  it('accepts the floor itself', () => {
     expect(
-      createEventSchema.parse({ ...base, dateTime: SAME_MOMENT_UTC, minDonation: 0 }).minDonation
-    ).toBe(0);
+      createEventSchema.parse({ ...base, dateTime: SAME_MOMENT_UTC, minDonation: MIN_DONATION })
+        .minDonation
+    ).toBe(MIN_DONATION);
   });
 
   it('accepts a real minimum', () => {
     expect(updateEventSchema.parse({ minDonation: 5 }).minDonation).toBe(5);
+  });
+
+  // Zero used to be the free-request switch. It is refused now: a request the
+  // guest does not pay for is a free write into the DJ's panel, and the rate
+  // limiter is the only thing left standing between that and a flood.
+  it('refuses zero, so a night cannot be opened to free requests', () => {
+    expect(() =>
+      createEventSchema.parse({ ...base, dateTime: SAME_MOMENT_UTC, minDonation: 0 })
+    ).toThrow();
+    expect(() => updateEventSchema.parse({ minDonation: 0 })).toThrow();
+  });
+
+  it('refuses an amount the provider would reject', () => {
+    expect(() => updateEventSchema.parse({ minDonation: 0.2 })).toThrow();
   });
 
   it('refuses a negative minimum', () => {

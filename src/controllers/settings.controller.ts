@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import prisma from '../utils/database';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { closeOutstandingRequests, releaseInBackground } from '../services/paymentRelease.service';
+import { MIN_DONATION } from '../config/payments';
 import { asyncHandler } from '../utils/asyncHandler';
 import { generateToken } from '../utils/jwt';
 
@@ -13,7 +14,9 @@ const updateSettingsSchema = z.object({
   firstName: z.string().trim().min(1).max(60).optional(),
   lastName: z.string().trim().min(1).max(60).optional(),
   address: z.string().trim().min(1).max(250).optional(),
-  minDonation: z.number().min(0.01).max(1000).optional(),
+  // The floor is the card providers', not a preference: see MIN_DONATION. The
+  // old 0.01 here would have let a DJ set a default no card could ever charge.
+  minDonation: z.number().min(MIN_DONATION).max(1000).optional(),
   // stripeAccountId is deliberately absent. It used to be a free-text field in
   // this form, which meant a DJ could name any Stripe account as the
   // destination of their guests' money - including someone else's. It is now
@@ -45,6 +48,9 @@ export const getSettings = asyncHandler(async (req: AuthenticatedRequest, res: R
     lastName: dj.lastName,
     address: dj.address,
     eventCode: dj.eventCode,
+    // False after a night has been ended: the code exists but no longer takes
+    // requests, and the panel has to be able to say so.
+    eventCodeActive: dj.eventCodeActive,
     minDonation: dj.minDonation,
     stripeAccountId: dj.stripeAccountId,
     paypalEmail: dj.paypalEmail,
@@ -194,6 +200,14 @@ export const endCurrentEvent = asyncHandler(async (req: AuthenticatedRequest, re
   // systems open, which is a regression rather than a tightening.
   const holds = await closeOutstandingRequests({ djId: req.dj!.djId });
 
+  // The night is over, so the code on the poster has to stop taking money. It
+  // used to stay open: the holds were released, the summary written, and the
+  // next guest to scan the same QR still got a payment screen.
+  await prisma.dJ.update({
+    where: { id: req.dj!.djId },
+    data: { eventCodeActive: false }
+  });
+
   res.json({
     message: 'Event ended successfully',
     summary: eventSummary
@@ -228,9 +242,11 @@ export const generateNewEventCode = asyncHandler(async (req: AuthenticatedReques
     if (!existing) isUnique = true;
   }
 
+  // Starting a night is what reopens the code, including for a DJ whose last
+  // one was ended.
   const updatedDj = await prisma.dJ.update({
     where: { id: req.dj!.djId },
-    data: { eventCode: eventCode! }
+    data: { eventCode: eventCode!, eventCodeActive: true }
   });
 
   const holds = await closeOutstandingRequests({ djId: req.dj!.djId });

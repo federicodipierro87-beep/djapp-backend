@@ -37,8 +37,8 @@ describe('createRequestSchema', () => {
     expect(parsed).not.toHaveProperty('eventId');
   });
 
-  // Zero is now a request the DJ may have opened the night to; below zero is
-  // not an amount at all. See freeRequest.test.ts for the free path.
+  // Below the floor is not a smaller donation, it is one no card will accept.
+  // See publicRequestGates.test.ts for the floor itself.
   it('rejects a negative donation', () => {
     expect(() => createRequestSchema.parse({ ...valid, donationAmount: -1 })).toThrow();
   });

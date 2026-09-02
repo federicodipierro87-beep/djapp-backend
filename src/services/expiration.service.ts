@@ -7,6 +7,17 @@ import {
   recordReleaseOutcome
 } from './paymentRelease.service';
 import { AWAITING_PAYMENT_TIMEOUT_MS } from '../config/payments';
+import {
+  LOCK_EXPIRE_REQUESTS,
+  LOCK_RECONCILE_HOLDS,
+  withAdvisoryLock
+} from '../utils/advisoryLock';
+
+// Long enough for a night's worth of rows, each of which is a provider round
+// trip, and short enough that a wedged sweep gives the lock back before the next
+// tick has piled up behind it.
+const EXPIRY_LOCK_TIMEOUT_MS = 60 * 1000;
+const RECONCILE_LOCK_TIMEOUT_MS = 4 * 60 * 1000;
 
 // The safety net, not the normal path. A hold is now released the moment the
 // event ends; this only catches the DJ who never closes anything. Twelve hours
@@ -33,11 +44,16 @@ export class ExpirationService {
   private tasks: cron.ScheduledTask[] = [];
 
   start() {
+    // Both jobs run under an advisory lock: they live in the API process, so
+    // every instance schedules them, and two instances sweeping at once means
+    // two calls to the provider about the same payment. See withAdvisoryLock.
     this.tasks.push(
       cron.schedule('* * * * *', async () => {
         try {
-          await this.expireOldRequests();
-          await this.expireAbandonedDrafts();
+          await withAdvisoryLock(LOCK_EXPIRE_REQUESTS, EXPIRY_LOCK_TIMEOUT_MS, async () => {
+            await this.expireOldRequests();
+            await this.expireAbandonedDrafts();
+          });
         } catch (error) {
           console.error('Error in expiration service:', error);
         }
@@ -49,7 +65,9 @@ export class ExpirationService {
     this.tasks.push(
       cron.schedule('*/5 * * * *', async () => {
         try {
-          await this.reconcileHolds();
+          await withAdvisoryLock(LOCK_RECONCILE_HOLDS, RECONCILE_LOCK_TIMEOUT_MS, () =>
+            this.reconcileHolds()
+          );
         } catch (error) {
           console.error('Error in hold reconciliation:', error);
         }
@@ -75,14 +93,15 @@ export class ExpirationService {
         // then went home left the guest's card blocked until the provider gave
         // up on its own.
         status: { in: ['PENDING', 'ACCEPTED'] },
-        // Rows where money is genuinely on hold, plus the free ones, which have
-        // no hold at all but still have to stop piling up in the DJ's panel. A
-        // request whose capture failed is deliberately excluded: nobody knows
-        // whether the money moved, and a blind release could hand back a
-        // donation already collected.
+        // Rows where money is genuinely on hold. A request whose capture failed
+        // is deliberately excluded: nobody knows whether the money moved, and a
+        // blind release could hand back a donation already collected.
         //
-        // The release below is a no-op on a free row - no intent, no method - so
-        // it reaches EXPIRED with its payment status left as it was.
+        // NOT_REQUIRED is still here even though nothing writes it any more.
+        // Free requests existed for one day and the rows they left behind would
+        // otherwise sit in a DJ's panel forever. The release below is a no-op on
+        // one - no intent, no method - so it reaches EXPIRED with its payment
+        // status untouched.
         paymentStatus: { in: ['AUTHORIZED', 'NOT_REQUIRED'] },
         // createdAt, not authorizedAt. authorizedAt is nullable and is null on
         // every row written before the invert_payment_flow migration, and in SQL

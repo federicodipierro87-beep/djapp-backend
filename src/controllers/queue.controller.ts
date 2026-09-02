@@ -307,9 +307,11 @@ export const markAsPlayed = asyncHandler(async (req: AuthenticatedRequest, res: 
 
   const request = queueItem.request;
 
-  // A free request has nothing to capture, and no payment status to rewrite:
-  // CAPTURED on it would claim zero euros were collected, and every path that
-  // reads that column would then read the row as a settled payment.
+  // Nothing writes NOT_REQUIRED any more, but the free-requests window left rows
+  // that carry it and a DJ can still play one. There is nothing to capture on
+  // them, and no payment status to rewrite: CAPTURED would claim zero euros were
+  // collected, and every path that reads that column would then read the row as
+  // a settled payment.
   const isFree = request.paymentStatus === 'NOT_REQUIRED';
 
   let captureResult;

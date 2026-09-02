@@ -3,6 +3,7 @@ import { EventStatus } from '@prisma/client';
 // is the small problem; the large one is that a test mocking the shared module
 // never reached this service at all.
 import prisma from '../utils/database';
+import { DJ_AVAILABILITY_SELECT } from '../utils/djAvailability';
 import { closeOutstandingRequests, releaseInBackground } from './paymentRelease.service';
 
 interface GeocodingResult {
@@ -192,7 +193,10 @@ export class EventService {
             // Satispay is offered to a DJ's guests only if that DJ has
             // connected their own business account.
             satispayKeyId: true,
-            satispayPrivateKey: true
+            satispayPrivateKey: true,
+            // Whether this DJ can be handed a request at all. The public page
+            // decides from this whether to show the form.
+            ...DJ_AVAILABILITY_SELECT
           }
         }
       }

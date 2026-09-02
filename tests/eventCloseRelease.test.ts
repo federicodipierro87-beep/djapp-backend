@@ -11,6 +11,7 @@ const transaction = vi.fn();
 const eventFindUnique = vi.fn();
 const eventUpdate = vi.fn();
 const djFindUnique = vi.fn();
+const djUpdate = vi.fn();
 const eventSummaryCreate = vi.fn();
 const eventSummaryFindFirst = vi.fn();
 const requestCount = vi.fn();
@@ -34,7 +35,10 @@ vi.mock('../src/utils/database', () => ({
       findUnique: (...args: unknown[]) => eventFindUnique(...args),
       update: (...args: unknown[]) => eventUpdate(...args)
     },
-    dJ: { findUnique: (...args: unknown[]) => djFindUnique(...args) },
+    dJ: {
+      findUnique: (...args: unknown[]) => djFindUnique(...args),
+      update: (...args: unknown[]) => djUpdate(...args)
+    },
     eventSummary: {
       create: (...args: unknown[]) => eventSummaryCreate(...args),
       findFirst: (...args: unknown[]) => eventSummaryFindFirst(...args)
@@ -95,7 +99,8 @@ beforeEach(() => {
   transaction.mockResolvedValue([]);
   cancelPaymentIntent.mockResolvedValue({ id: 'pi_1', status: 'canceled' });
 
-  djFindUnique.mockResolvedValue({ id: 'dj-1', eventCode: 'ABC123' });
+  djFindUnique.mockResolvedValue({ id: 'dj-1', eventCode: 'ABC123', eventCodeActive: true });
+  djUpdate.mockResolvedValue({ id: 'dj-1', eventCodeActive: false });
   eventSummaryFindFirst.mockResolvedValue(null);
   eventSummaryCreate.mockResolvedValue({ id: 'sum-1' });
   requestCount.mockResolvedValue(0);
@@ -216,6 +221,18 @@ describe('answering the DJ', () => {
     await invoke(endCurrentEvent, 'dj-1');
 
     expect(cancelPaymentIntent).toHaveBeenCalledExactlyOnceWith('pi_1');
+  });
+
+  // The legacy code has no Event row to carry a status, so this flag is the only
+  // thing that closes it. Without it the night was over, the holds released and
+  // the summary written, and the QR poster on the wall went on taking payments.
+  it('closes the event code, not just the requests', async () => {
+    await invoke(endCurrentEvent, 'dj-1');
+
+    expect(djUpdate).toHaveBeenCalledWith({
+      where: { id: 'dj-1' },
+      data: { eventCodeActive: false }
+    });
   });
 });
 

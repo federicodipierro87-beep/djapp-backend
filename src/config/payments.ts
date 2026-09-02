@@ -4,6 +4,18 @@ import { PaymentMethod, PaymentProvider } from '@prisma/client';
 // mismatch here is the difference between charging €10 and charging $10.
 export const CURRENCY = 'eur';
 
+// The smallest donation that can exist. Not a product preference: Stripe refuses
+// a euro charge under 50 cents, and it refuses it when the PaymentIntent is
+// created, so a smaller amount is not a smaller payment - it is a request that
+// cannot be filed at all. The guest would get "Amount must convert to at least
+// 50 cents" from the provider instead of an answer from us.
+//
+// It is also the only friction on the public endpoint: filing a request costs a
+// real card authorisation, which is what a flood of junk requests cannot afford.
+// Every schema that accepts an amount is floored by this one constant, so
+// raising or lowering it is a single edit. Below 0.5 the card providers break.
+export const MIN_DONATION = 0.5;
+
 // A request that nobody has paid for is invisible to the DJ, so leaving it
 // around costs nothing except a dangling authorisation at the provider. Half an
 // hour is long enough for a guest to fumble through 3-D Secure and short enough
